@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ایجنت ویس فارسی</title>
+<meta name="description" content="تبدیل گفتار فارسی به متن — زنده از میکروفون و از روی فایل صوتی">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='19' font-size='19'>🎙️</text></svg>">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<div class="wrap" id="app">
+  <noscript>
+    <div class="note crit">
+      <strong>جاوااسکریپت خاموش است. </strong>
+      این ابزار کاملاً داخل مرورگر اجرا می‌شود و بدون جاوااسکریپت کار نمی‌کند.
+    </div>
+  </noscript>
+</div>
+
+<div id="toasts"></div>
+
+<!-- ترتیب بارگذاری یک گراف وابستگی واقعی است: چند ماژول وابستگی‌شان را
+     هنگام بارگذاری می‌گیرند. این ترتیب را به هم نزنید.
+     config → util → store → audio → openrouter → transcribe → live → ui → app -->
+<script src="js/config.js"></script>
+<script src="js/util.js"></script>
+<script src="js/store.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/openrouter.js"></script>
+<script src="js/transcribe.js"></script>
+<script src="js/live.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
