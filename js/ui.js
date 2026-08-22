@@ -128,6 +128,13 @@
       disabled: !supported
     });
 
+    // انتخاب‌گر زبان — هم کاربردی است و هم ابزار تشخیص:
+    // اگر انگلیسی کار کند و فارسی نه، مشکل از شبکه نیست، از پشتیبانی زبان است.
+    var langSel = el('select', { id: 'lang-sel', style: 'width:auto;min-width:210px' }, [
+      el('option', { value: 'fa-IR', text: 'فارسی (ایران)', selected: true }),
+      el('option', { value: 'en-US', text: 'English — فقط برای تست' })
+    ]);
+
     var timer = null;
     function tick() {
       if (!state.live || !state.live.running) return;
@@ -193,7 +200,7 @@
         }
       };
 
-      live.start({ recordAudio: true, lang: cfg.LANG }).catch(function (e) {
+      live.start({ recordAudio: true, lang: langSel.value }).catch(function (e) {
         toast(e.message, 'err');
         stopUI();
       });
@@ -254,6 +261,10 @@
         text: 'دکمه را بزنید و فارسی حرف بزنید. متن هم‌زمان نوشته می‌شود. ' +
               'این بخش از موتور تشخیص گفتار خودِ مرورگر استفاده می‌کند: رایگان، بدون سقف و بدون کلید API.'
       }),
+      el('div', { class: 'row', style: 'justify-content:center' }, [
+        el('span', { class: 'hint', style: 'margin:0', text: 'زبان گفتار:' }),
+        langSel
+      ]),
       el('div', { class: 'mic-wrap' }, [micBtn, stateLine]),
       out,
       el('div', { style: 'height:12px' }),
