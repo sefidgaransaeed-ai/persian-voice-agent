@@ -33,10 +33,22 @@ $mime = @{
 }
 
 # فقط روی لوپ‌بک گوش می‌دهیم؛ از بیرون شبکه در دسترس نیست
-$listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $Port)
-try {
-  $listener.Start()
-} catch {
+# روی هر دو پشته گوش می‌دهیم.
+# چرا هر دو: روی ویندوز، localhost اول به ::1 حل می‌شود و مرورگر هم اول همان را
+# می‌زند. اگر فقط 127.0.0.1 را بگیریم، صفحه با خطای اتصال بالا نمی‌آید — هرچند
+# ابزارهای خط فرمان که به IPv4 برمی‌گردند درست کار می‌کنند و آدم را گمراه می‌کنند.
+# هر دو عمداً فقط لوپ‌بک‌اند تا سرور از بیرون شبکه در دسترس نباشد.
+$listeners = @()
+foreach ($ip in @([System.Net.IPAddress]::Loopback, [System.Net.IPAddress]::IPv6Loopback)) {
+  try {
+    $l = New-Object System.Net.Sockets.TcpListener($ip, $Port)
+    $l.Start()
+    $listeners += $l
+  } catch {
+    Write-Host "  هشدار: گوش دادن روی $($ip.ToString()) ممکن نشد." -ForegroundColor Yellow
+  }
+}
+if ($listeners.Count -eq 0) {
   Write-Host "درگاه $Port آزاد نیست. با -Port یک عدد دیگر بدهید." -ForegroundColor Red
   exit 1
 }
@@ -46,6 +58,8 @@ Write-Host ""
 Write-Host "  ایجنت ویس فارسی" -ForegroundColor Cyan
 Write-Host "  در حال سرو از: $root"
 Write-Host "  نشانی:         $url" -ForegroundColor Green
+Write-Host "  جایگزین:       http://127.0.0.1:$Port/"
+Write-Host "  گوش دادن روی:  $($listeners.Count) نشانی (IPv4 و IPv6)"
 Write-Host "  توقف:          Ctrl+C"
 Write-Host ""
 
@@ -68,7 +82,13 @@ function Send-Response {
 
 try {
   while ($true) {
-    $client = $listener.AcceptTcpClient()
+    # AcceptTcpClient روی یک شنونده بلوکه می‌شود و شنوندهٔ دیگر را گرسنه می‌گذارد،
+    # پس نوبتی سرک می‌کشیم و فقط وقتی درخواستی در صف باشد accept می‌کنیم.
+    $ready = $null
+    foreach ($l in $listeners) { if ($l.Pending()) { $ready = $l; break } }
+    if (-not $ready) { Start-Sleep -Milliseconds 15; continue }
+
+    $client = $ready.AcceptTcpClient()
     try {
       $client.ReceiveTimeout = 5000
       $stream = $client.GetStream()
@@ -127,6 +147,6 @@ try {
     }
   }
 } finally {
-  $listener.Stop()
+  foreach ($l in $listeners) { try { $l.Stop() } catch { } }
   Write-Host "`nسرور متوقف شد." -ForegroundColor Cyan
 }
