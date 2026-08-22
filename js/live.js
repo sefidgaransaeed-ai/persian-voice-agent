@@ -75,21 +75,36 @@
         self.emit('text', self.finalText, interim.trim());
       };
 
+      // این خطاها با تلاش دوباره درست نمی‌شوند. اگر حلقهٔ راه‌اندازی مجدد ادامه
+      // پیدا کند، هر دور یک پیام تکراری روی صفحه تلنبار می‌شود.
+      var FATAL = {
+        'not-allowed': 'اجازهٔ دسترسی به میکروفون داده نشد. روی قفل کنار نوار آدرس بزنید و میکروفون را Allow کنید.',
+        'service-not-allowed': 'مرورگر اجازهٔ استفاده از سرویس تشخیص گفتار را نداد. صفحه را از روی http://localhost باز کنید، نه با دابل‌کلیک روی فایل.',
+        'audio-capture': 'میکروفونی پیدا نشد. اتصال میکروفون را بررسی کنید.',
+        'language-not-supported': 'سرویس تشخیص گفتار این مرورگر از فارسی پشتیبانی نمی‌کند.',
+        'network': 'سرور تشخیص گفتار مرورگر پاسخ نداد. این سرویس معمولاً از ایران در دسترس نیست — ' +
+                   'یک بار با VPN امتحان کنید.'
+      };
+
       r.onerror = function (ev) {
         // no-speech و aborted طبیعی‌اند و نباید کاربر را بترسانند
         if (ev.error === 'no-speech' || ev.error === 'aborted') return;
-        var map = {
-          'not-allowed': 'اجازهٔ دسترسی به میکروفون داده نشد. از نوار آدرس مرورگر اجازه بدهید.',
-          'service-not-allowed': 'سرویس تشخیص گفتار در دسترس نیست. صفحه را از روی http://localhost باز کنید، نه با دابل‌کلیک.',
-          'audio-capture': 'میکروفونی پیدا نشد.',
-          'network': 'ارتباط سرویس تشخیص گفتار قطع شد. اینترنت را بررسی کنید.'
-        };
-        self.emit('error', new Error(map[ev.error] || ('خطای تشخیص گفتار: ' + ev.error)));
+        if (FATAL[ev.error]) {
+          // حلقهٔ راه‌اندازی مجدد را می‌بندیم تا پیام فقط یک بار بیاید
+          self.wantStop = true;
+          self.fatal = ev.error;
+          self.emit('error', new Error(FATAL[ev.error]));
+          return;
+        }
+        self.emit('error', new Error('خطای تشخیص گفتار: ' + ev.error));
       };
 
       // کروم پس از هر سکوت خودش قطع می‌کند؛ تا وقتی کاربر نگفته «توقف» دوباره وصلش می‌کنیم
+      self.restarts = 0;
       r.onend = function () {
         if (self.wantStop) { self.finish(); return; }
+        // سقف ایمنی: اگر چیزی مدام قطع می‌کند، بی‌نهایت تلاش نکن
+        if (++self.restarts > 60) { self.finish(); return; }
         try { r.start(); }
         catch (e) { self.finish(); }
       };

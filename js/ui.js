@@ -36,7 +36,13 @@
   }
 
   /* ——— اعلان ——— */
+  var lastToast = { msg: null, at: 0 };
   function toast(msg, kind) {
+    // پیام یکسان در فاصلهٔ کوتاه تکرار نمی‌شود؛ یک خطای پیاپی نباید صفحه را پر کند
+    var now = Date.now();
+    if (msg === lastToast.msg && now - lastToast.at < 8000) return;
+    lastToast = { msg: msg, at: now };
+
     var box = $('#toasts') || document.body.appendChild(el('div', { id: 'toasts' }));
     var t = el('div', { class: 'toast' + (kind ? ' ' + kind : ''), text: msg });
     box.appendChild(t);
