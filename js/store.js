@@ -47,6 +47,18 @@
       Object.keys(DEFAULTS).forEach(function (k) {
         out[k] = (s && s[k] !== undefined) ? s[k] : DEFAULTS[k];
       });
+
+      // مقدار ذخیره‌شده بر پیش‌فرض مقدم است، پس تنظیمات نسخه‌های قبلی زنده
+      // می‌مانند. نسخهٔ OpenRouter نام مدل صوتی خودش را ذخیره کرده بود و پس از
+      // تعویض موتور، همان به Groq می‌رفت و خطای ۴۰۴ می‌گرفت. هر مقدار ناشناخته
+      // به پیش‌فرض برمی‌گردد.
+      if (!App.config.GROQ_MODELS.some(function (m) { return m.id === out.model; })) {
+        out.model = DEFAULTS.model;
+      }
+      if (['fa', 'en', 'auto'].indexOf(out.language) === -1) out.language = DEFAULTS.language;
+      if (!(Number(out.liveChunkSeconds) > 0)) out.liveChunkSeconds = DEFAULTS.liveChunkSeconds;
+      if (!(Number(out.chunkSeconds) > 0)) out.chunkSeconds = DEFAULTS.chunkSeconds;
+
       return out;
     },
     setSetting: function (k, v) {

@@ -11,15 +11,13 @@
   var lastCall = 0;
   var GUARD_MS = 350;
 
-  // مدل‌های رونویسی Groq. turbo سریع‌تر و ارزان‌تر است؛ large دقیق‌تر.
-  var MODELS = [
-    { id: 'whisper-large-v3-turbo', label: 'Whisper Large v3 Turbo — سریع' },
-    { id: 'whisper-large-v3', label: 'Whisper Large v3 — دقیق‌تر' }
-  ];
+  // یک منبع حقیقت در config؛ store هم برای اعتبارسنجی از همان می‌خواند
+  var MODELS = App.config.GROQ_MODELS;
 
   function friendlyError(status, body) {
     var msg = (body && body.error && body.error.message) || '';
     if (status === 401) return 'کلید Groq پذیرفته نشد. در تنظیمات کلید درست را وارد کنید.';
+    if (status === 404) return 'این مدل در Groq وجود ندارد. در تنظیمات یکی از مدل‌های فهرست را انتخاب کنید.';
     if (status === 413) return 'فایل صوتی بزرگ‌تر از سقف مجاز است. طول تکه‌ها را در تنظیمات کم کنید.';
     if (status === 429) return 'به سقف درخواست Groq رسیدید. کمی صبر کنید.';
     if (status === 400 && /language/i.test(msg)) return 'کد زبان پذیرفته نشد.';

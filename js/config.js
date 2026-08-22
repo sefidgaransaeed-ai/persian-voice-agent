@@ -8,8 +8,13 @@
        چرا Groq: Web Speech مرورگر روی این شبکه اصلاً وصل نمی‌شود، و تنها مدل
        صوتیِ رایگان OpenRouter پشت درِ ۰.۵ دلاری قفل است. Groq سطح رایگان واقعی
        دارد، در دسترس است و Whisper فارسی را می‌فهمد. */
+    // فهرست معتبر اینجا می‌نشیند چون store هم برای اعتبارسنجی لازمش دارد
+    // و store پیش از groq بارگذاری می‌شود.
+    GROQ_MODELS: [
+      { id: 'whisper-large-v3-turbo', label: 'Whisper Large v3 Turbo — سریع' },
+      { id: 'whisper-large-v3', label: 'Whisper Large v3 — دقیق‌تر' }
+    ],
     GROQ_MODEL: 'whisper-large-v3-turbo',
-    GROQ_MODEL_ACCURATE: 'whisper-large-v3',
     LANGUAGE: 'fa',
 
     /* ——— OpenRouter: فقط برای ویرایش و نقطه‌گذاری متن ———
