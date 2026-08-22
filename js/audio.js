@@ -136,6 +136,27 @@
         });
     },
 
+    /* همان مسیر، ولی خروجی Blob است نه base64.
+       Groq فایل را با multipart می‌گیرد، پس base64 فقط حجم را ۳۳٪ باد می‌کرد. */
+    prepareBlobs: function (blob, seconds) {
+      return decode(blob)
+        .then(toMono16k)
+        .then(function (mono) {
+          var pieces = chunk(mono, cfg.SAMPLE_RATE,
+            seconds || cfg.CHUNK_SECONDS, cfg.OVERLAP_SECONDS);
+          return {
+            duration: mono.length / cfg.SAMPLE_RATE,
+            chunks: pieces.map(function (p) {
+              return {
+                start: p.start,
+                end: p.end,
+                blob: new Blob([encodeWav(p.data, cfg.SAMPLE_RATE)], { type: 'audio/wav' })
+              };
+            })
+          };
+        });
+    },
+
     // برای دکمهٔ «ذخیرهٔ صدا» در حالت زنده
     blobFromSamples: function (samples) {
       return new Blob([encodeWav(samples, cfg.SAMPLE_RATE)], { type: 'audio/wav' });

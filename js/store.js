@@ -1,10 +1,11 @@
-/* ماندگاری در localStorage — کلید API، تنظیمات و بایگانی رونوشت‌ها */
+/* ماندگاری در localStorage — کلیدها، تنظیمات و بایگانی رونوشت‌ها */
 (function (App) {
   'use strict';
 
-  var K_KEY = 'fa-voice.apiKey';
-  var K_SET = 'fa-voice.settings';
-  var K_ARC = 'fa-voice.archive';
+  var K_GROQ = 'fa-voice.groqKey';
+  var K_OR   = 'fa-voice.apiKey';
+  var K_SET  = 'fa-voice.settings';
+  var K_ARC  = 'fa-voice.archive';
 
   function read(key, fallback) {
     try {
@@ -16,22 +17,29 @@
     try { localStorage.setItem(key, JSON.stringify(val)); return true; }
     catch (e) { return false; }
   }
+  function keyAccessor(storageKey) {
+    return function (v) {
+      if (v === undefined) return read(storageKey, '');
+      if (v === null) { localStorage.removeItem(storageKey); return ''; }
+      var s = String(v).trim();
+      write(storageKey, s);
+      return s;
+    };
+  }
 
   var DEFAULTS = {
-    model: App.config.DEFAULT_MODEL,
+    model: App.config.GROQ_MODEL,
     textModel: App.config.TEXT_MODEL,
+    liveChunkSeconds: App.config.LIVE_CHUNK_SECONDS,
     chunkSeconds: App.config.CHUNK_SECONDS,
+    language: App.config.LANGUAGE,
     autoPolish: false,
     theme: 'system'
   };
 
   App.store = {
-    apiKey: function (v) {
-      if (v === undefined) return read(K_KEY, '');
-      if (v === null) { localStorage.removeItem(K_KEY); return ''; }
-      write(K_KEY, String(v).trim());
-      return String(v).trim();
-    },
+    groqKey: keyAccessor(K_GROQ),
+    apiKey: keyAccessor(K_OR),        // OpenRouter — فقط برای ویرایش متن
 
     settings: function () {
       var s = read(K_SET, {});

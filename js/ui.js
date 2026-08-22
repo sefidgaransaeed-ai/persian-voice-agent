@@ -7,14 +7,15 @@
 
   var state = {
     tab: 'live',
-    live: null,
-    liveText: '',
+    rec: null,
+    parts: [],        // متن هر تکه، به ترتیب شماره
+    pending: 0,       // تکه‌های در راه
     liveBlob: null,
     fileBusy: false,
     hostTheme: null
   };
 
-  /* ——— آیکون‌ها: SVG درجا، بدون هیچ فونت آیکون بیرونی ——— */
+  /* ——— آیکون‌ها: SVG درجا، بدون فونت آیکون بیرونی ——— */
   function icon(name, size) {
     var s = size || 18;
     var paths = {
@@ -38,7 +39,7 @@
   /* ——— اعلان ——— */
   var lastToast = { msg: null, at: 0 };
   function toast(msg, kind) {
-    // پیام یکسان در فاصلهٔ کوتاه تکرار نمی‌شود؛ یک خطای پیاپی نباید صفحه را پر کند
+    // پیام یکسان در فاصلهٔ کوتاه تکرار نمی‌شود؛ خطای پیاپی نباید صفحه را پر کند
     var now = Date.now();
     if (msg === lastToast.msg && now - lastToast.at < 8000) return;
     lastToast = { msg: msg, at: now };
@@ -71,85 +72,85 @@
   /* ——— کمکی‌ها ——— */
   function badge(kind, text) {
     // نقطه و متن با هم؛ وضعیت هرگز فقط با رنگ گفته نمی‌شود
-    return el('span', { class: 'badge ' + kind }, [
-      el('span', { class: 'dot' }), text
-    ]);
+    return el('span', { class: 'badge ' + kind }, [el('span', { class: 'dot' }), text]);
   }
   function btn(label, opts) {
     opts = opts || {};
     var b = el('button', {
       class: 'btn' + (opts.variant ? ' ' + opts.variant : ''),
-      type: 'button',
-      onclick: opts.onClick,
-      disabled: opts.disabled,
-      title: opts.title
+      type: 'button', onclick: opts.onClick, disabled: opts.disabled, title: opts.title
     });
     if (opts.icon) {
       var i = el('span', { html: icon(opts.icon) });
       i.style.display = 'inline-flex';
       b.appendChild(i);
     }
-    // فاصلهٔ بین دو عنصر درون‌خطی جمع می‌شود؛ gap در CSS این را حل کرده
     b.appendChild(document.createTextNode(label));
     return b;
   }
   function field(labelText, control) {
     return el('label', { class: 'field' }, [el('span', { text: labelText }), control]);
   }
+  function needGroqKey() {
+    var k = App.store.groqKey();
+    if (!k) {
+      toast('اول کلید Groq را در زبانهٔ تنظیمات وارد کنید.', 'err');
+      return null;
+    }
+    return k;
+  }
+  // متن تکه‌ها را به ترتیب و بدون تکرارِ لبهٔ برش به هم می‌دوزد
+  function joined() {
+    var out = '';
+    for (var i = 0; i < state.parts.length; i++) {
+      if (state.parts[i]) out = App.transcribe.stitch(out, state.parts[i]);
+    }
+    return out;
+  }
 
   /* ================= زبانهٔ گفتار زنده ================= */
 
   function renderLive(root) {
-    var supported = App.Live.supported();
-    var onFile = location.protocol === 'file:';
-
-    if (onFile) {
+    if (location.protocol === 'file:') {
       root.appendChild(el('div', { class: 'note crit' }, [
         el('strong', { text: 'این صفحه با دابل‌کلیک باز شده. ' }),
-        'مرورگرها دسترسی میکروفون را روی نشانی file:// نمی‌دهند. ' +
-        'فایل serve.ps1 کنار همین پروژه را اجرا کنید و صفحه را از روی ' +
-        'http://localhost:8787 باز کنید. رونویسی فایل صوتی از همین‌جا هم کار می‌کند.'
+        'مرورگرها روی نشانی file:// اجازهٔ میکروفون نمی‌دهند. فایل serve.ps1 را اجرا ' +
+        'کنید و صفحه را از روی http://localhost:8787 باز کنید.'
       ]));
     }
-    if (!supported) {
+    if (!App.Recorder.supported()) {
       root.appendChild(el('div', { class: 'note crit' }, [
-        el('strong', { text: 'مرورگر پشتیبانی نمی‌کند. ' }),
-        'تشخیص گفتار زنده در Microsoft Edge و Google Chrome کار می‌کند. ' +
-        'در Firefox موجود نیست.'
+        el('strong', { text: 'ضبط صدا در این مرورگر ممکن نیست. ' }),
+        'از Microsoft Edge یا Google Chrome استفاده کنید.'
       ]));
     }
 
     var out = el('div', { class: 'out', id: 'live-out', 'aria-live': 'polite' });
     var stateLine = el('div', { class: 'mic-state', id: 'mic-state', text: 'آماده' });
+    var meter = el('div', { class: 'bar', style: 'max-width:220px;margin:10px auto' }, [el('i')]);
     var micBtn = el('button', {
       class: 'mic', id: 'mic-btn', 'data-on': 'false',
-      'aria-label': 'شروع ضبط', title: 'شروع / توقف',
-      html: icon('mic', 40),
-      disabled: !supported
+      'aria-label': 'شروع ضبط', title: 'شروع / توقف', html: icon('mic', 40)
     });
-
-    // انتخاب‌گر زبان — هم کاربردی است و هم ابزار تشخیص:
-    // اگر انگلیسی کار کند و فارسی نه، مشکل از شبکه نیست، از پشتیبانی زبان است.
-    var langSel = el('select', { id: 'lang-sel', style: 'width:auto;min-width:210px' }, [
-      el('option', { value: 'fa-IR', text: 'فارسی (ایران)', selected: true }),
-      el('option', { value: 'en-US', text: 'English — فقط برای تست' })
-    ]);
 
     var timer = null;
     function tick() {
-      if (!state.live || !state.live.running) return;
-      stateLine.textContent = 'در حال شنیدن…  ' + fmt.dur(state.live.elapsed());
+      if (!state.rec || !state.rec.running) return;
+      var s = 'در حال شنیدن…  ' + fmt.dur(state.rec.elapsed());
+      if (state.pending > 0) s += '   •   ' + fmt.fa(state.pending) + ' تکه در حال رونویسی';
+      stateLine.textContent = s;
     }
 
-    function paint(finalText, interim) {
+    function paint() {
+      var text = joined();
       App.dom.clear(out);
-      if (finalText) out.appendChild(document.createTextNode(finalText));
-      if (interim) {
-        // یک فاصلهٔ صریح، چون فاصلهٔ بین دو عنصر درون‌خطی جمع می‌شود
-        if (finalText) out.appendChild(document.createTextNode(' '));
-        out.appendChild(el('span', { class: 'interim', text: interim }));
+      if (text) out.appendChild(document.createTextNode(text));
+      if (state.pending > 0) {
+        if (text) out.appendChild(document.createTextNode(' '));
+        out.appendChild(el('span', { class: 'interim', text: '…' }));
       }
       out.scrollTop = out.scrollHeight;
+      refreshActions();
     }
 
     function stopUI() {
@@ -157,64 +158,95 @@
       micBtn.innerHTML = icon('mic', 40);
       micBtn.setAttribute('aria-label', 'شروع ضبط');
       if (timer) { clearInterval(timer); timer = null; }
+      meter.firstChild.style.width = '0%';
       out.setAttribute('contenteditable', 'true');
       out.setAttribute('spellcheck', 'false');
       refreshActions();
     }
 
     micBtn.addEventListener('click', function () {
-      if (state.live && state.live.running) { state.live.stop(); return; }
+      if (state.rec && state.rec.running) {
+        stateLine.textContent = 'در حال تمام کردن تکه‌های باقی‌مانده…';
+        state.rec.stop();
+        return;
+      }
+      var key = needGroqKey();
+      if (!key) return;
 
-      var live = new App.Live();
-      state.live = live;
-      state.liveText = '';
+      var s = App.store.settings();
+      var rec = new App.Recorder();
+      state.rec = rec;
+      state.parts = [];
+      state.pending = 0;
       state.liveBlob = null;
       out.removeAttribute('contenteditable');
       App.dom.clear(out);
 
-      live.on.text = function (f, i) { state.liveText = f; paint(f, i); refreshActions(); };
-      live.on.error = function (e) { toast(e.message, 'err'); };
-      live.on.state = function (s) {
-        if (s === 'running') {
+      rec.on.level = function (peak) {
+        meter.firstChild.style.width = Math.min(100, Math.round(peak * 180)) + '%';
+      };
+      rec.on.error = function (e) { toast(e.message, 'err'); };
+      rec.on.state = function (st) {
+        if (st === 'running') {
           micBtn.setAttribute('data-on', 'true');
           micBtn.innerHTML = icon('stop', 34);
           micBtn.setAttribute('aria-label', 'توقف ضبط');
-          timer = setInterval(tick, 500);
+          timer = setInterval(tick, 400);
           tick();
         }
       };
-      live.on.done = function (text, blob) {
-        state.liveText = text;
-        state.liveBlob = blob;
-        paint(text, '');
-        stateLine.textContent = text
-          ? 'پایان.  ' + fmt.fa(text.trim().split(/\s+/).filter(Boolean).length) + ' کلمه ثبت شد.'
-          : 'چیزی شنیده نشد.';
-        stopUI();
-        if (text) {
-          App.store.addToArchive({
-            title: 'گفتار زنده — ' + fmt.stamp(),
-            text: text, source: 'live', model: 'Web Speech API (مرورگر)',
-            seconds: live.elapsed()
-          });
-        }
+
+      rec.on.chunk = function (blob, index) {
+        state.pending++;
+        state.parts[index] = state.parts[index] || '';
+        paint();
+        App.groq.transcribe(blob, {
+          key: key, model: s.model, language: s.language,
+          filename: 'live' + index + '.wav'
+        }).then(function (text) {
+          state.parts[index] = text || '';
+        }).catch(function (e) {
+          toast(e.message, 'err');
+        }).then(function () {
+          state.pending--;
+          paint();
+          tick();
+        });
       };
 
-      live.start({ recordAudio: true, lang: langSel.value }).catch(function (e) {
-        toast(e.message, 'err');
+      rec.on.done = function (blob) {
+        state.liveBlob = blob;
+        var finish = setInterval(function () {
+          if (state.pending > 0) return;
+          clearInterval(finish);
+          paint();
+          var text = joined();
+          stateLine.textContent = text
+            ? 'پایان.  ' + fmt.fa(text.trim().split(/\s+/).filter(Boolean).length) + ' کلمه.'
+            : 'چیزی شنیده نشد.';
+          if (text) {
+            App.store.addToArchive({
+              title: 'گفتار زنده — ' + fmt.stamp(), text: text,
+              source: 'live', model: s.model, seconds: rec.elapsed()
+            });
+          }
+        }, 250);
         stopUI();
-      });
+      };
+
+      rec.start({ chunkSeconds: Number(s.liveChunkSeconds) || cfg.LIVE_CHUNK_SECONDS })
+        .catch(function (e) { toast(e.message, 'err'); stopUI(); });
     });
 
-    /* ——— دکمه‌های پس از ضبط ——— */
+    /* ——— دکمه‌ها ——— */
     var actions = el('div', { class: 'row', id: 'live-actions' });
     function currentText() {
-      return (out.getAttribute('contenteditable') === 'true' ? out.innerText : state.liveText) || '';
+      return (out.getAttribute('contenteditable') === 'true' ? out.innerText : joined()) || '';
     }
     function refreshActions() {
       App.dom.clear(actions);
       var has = !!currentText().trim();
-      var busy = state.live && state.live.running;
+      var busy = state.rec && state.rec.running;
 
       actions.appendChild(btn('رونوشت', {
         icon: 'copy', disabled: !has || busy,
@@ -226,28 +258,23 @@
       }));
       actions.appendChild(btn('ذخیرهٔ متن', {
         icon: 'down', disabled: !has || busy,
-        onClick: function () {
-          App.file.download('گفتار-' + Date.now() + '.txt', currentText());
-        }
+        onClick: function () { App.file.download('گفتار-' + Date.now() + '.txt', currentText()); }
       }));
       if (state.liveBlob) {
         actions.appendChild(btn('ذخیرهٔ صدا', {
           icon: 'down',
-          onClick: function () {
-            var ext = (state.liveBlob.type.indexOf('webm') !== -1) ? 'webm' : 'ogg';
-            App.file.download('صدا-' + Date.now() + '.' + ext, state.liveBlob);
-          }
+          onClick: function () { App.file.download('صدا-' + Date.now() + '.wav', state.liveBlob); }
         }));
       }
       actions.appendChild(btn('ویرایش و نقطه‌گذاری', {
         icon: 'wand', variant: 'primary', disabled: !has || busy,
-        title: 'متن خام را با یک مدل متنی رایگان پاک‌نویس می‌کند (به کلید OpenRouter نیاز دارد)',
+        title: 'غلط‌های شنیداری را با کمک متن اطراف اصلاح و نقطه‌گذاری می‌کند (کلید OpenRouter لازم است)',
         onClick: function (ev) { polish(ev.currentTarget, currentText(), out); }
       }));
       actions.appendChild(btn('پاک کردن', {
         icon: 'trash', variant: 'ghost', disabled: !has || busy,
         onClick: function () {
-          state.liveText = ''; state.liveBlob = null;
+          state.parts = []; state.liveBlob = null;
           App.dom.clear(out); stateLine.textContent = 'آماده'; refreshActions();
         }
       }));
@@ -258,14 +285,10 @@
       el('h2', { text: 'گفتار زندهٔ فارسی' }),
       el('p', {
         class: 'hint',
-        text: 'دکمه را بزنید و فارسی حرف بزنید. متن هم‌زمان نوشته می‌شود. ' +
-              'این بخش از موتور تشخیص گفتار خودِ مرورگر استفاده می‌کند: رایگان، بدون سقف و بدون کلید API.'
+        text: 'دکمه را بزنید و فارسی حرف بزنید. صدا هر چند ثانیه یک بار به Groq فرستاده ' +
+              'می‌شود و متن پشت سر هم اضافه می‌شود — یکی دو ثانیه تأخیر طبیعی است.'
       }),
-      el('div', { class: 'row', style: 'justify-content:center' }, [
-        el('span', { class: 'hint', style: 'margin:0', text: 'زبان گفتار:' }),
-        langSel
-      ]),
-      el('div', { class: 'mic-wrap' }, [micBtn, stateLine]),
+      el('div', { class: 'mic-wrap' }, [micBtn, meter, stateLine]),
       out,
       el('div', { style: 'height:12px' }),
       actions
@@ -275,62 +298,44 @@
     return root;
   }
 
-  /* ——— پاک‌نویس با مدل متنی (روی سطح رایگان کار می‌کند) ——— */
+  /* ——— پاک‌نویس با مدل متنی رایگان OpenRouter ——— */
   function polish(button, text, target) {
     var key = App.store.apiKey();
     if (!key) {
-      toast('برای این کار کلید OpenRouter لازم است. در زبانهٔ تنظیمات واردش کنید.', 'err');
+      toast('برای ویرایش متن، کلید OpenRouter لازم است. در تنظیمات واردش کنید.', 'err');
       return;
     }
-    var old = button.textContent;
+    var label = button.lastChild;
+    var old = label.textContent;
     button.disabled = true;
-    button.lastChild.textContent = 'در حال ویرایش…';
+    label.textContent = 'در حال ویرایش…';
 
-    App.or.polish(text, {
-      key: key,
-      model: App.store.settings().textModel,
-      onNotice: function (m) { toast(m); }
-    }).then(function (clean) {
-      if (!clean) throw new Error('مدل پاسخ خالی داد.');
-      target.textContent = clean;
-      state.liveText = clean;
-      toast('متن ویرایش شد.', 'ok');
-    }).catch(function (e) {
-      toast(e.message, 'err');
-    }).then(function () {
-      button.disabled = false;
-      button.lastChild.textContent = old.trim() ? old : ' ویرایش و نقطه‌گذاری';
-    });
+    App.or.polish(text, { key: key, model: App.store.settings().textModel })
+      .then(function (clean) {
+        if (!clean) throw new Error('مدل پاسخ خالی داد.');
+        target.textContent = clean;
+        state.parts = [clean];
+        toast('متن ویرایش شد.', 'ok');
+      })
+      .catch(function (e) { toast(e.message, 'err'); })
+      .then(function () { button.disabled = false; label.textContent = old; });
   }
 
   /* ================= زبانهٔ فایل صوتی ================= */
 
   function renderFile(root) {
-    root.appendChild(el('div', { class: 'note' }, [
-      el('strong', { text: 'وضعیت: نیازمند اعتبار. ' }),
-      'آزمایش شد: OpenRouter ارسال صدا را برای حساب‌های با موجودی صفر مسدود می‌کند و ' +
-      'خطای «at least $0.50 in balance for audio» می‌دهد — حتی برای مدل رایگان و حتی برای ' +
-      'فایل دو ثانیه‌ای. این محدودیت به مدل ربطی ندارد، به موجودی حساب مربوط است. ' +
-      'به‌محض شارژ حساب، همین بخش بدون تغییر کد کار می‌کند.'
-    ]));
-
     var picked = null;
-    var input = el('input', {
-      type: 'file', accept: 'audio/*,video/*', class: 'hidden', id: 'file-input'
-    });
-    var drop = el('div', {
-      class: 'drop', tabindex: '0', role: 'button',
-      'aria-label': 'انتخاب فایل صوتی'
-    }, [
+    var input = el('input', { type: 'file', accept: 'audio/*,video/*', class: 'hidden' });
+    var drop = el('div', { class: 'drop', tabindex: '0', role: 'button', 'aria-label': 'انتخاب فایل صوتی' }, [
       el('div', { html: icon('file', 30) }),
       el('div', { class: 'big-t', text: 'فایل صوتی را اینجا رها کنید' }),
       el('div', { class: 'small-t', text: 'یا کلیک کنید. mp3، wav، m4a، ogg، webm و صدای ویدیو' })
     ]);
 
-    var info = el('div', { class: 'stage', id: 'file-info' });
+    var info = el('div', { class: 'stage' });
     var bar = el('div', { class: 'bar' }, [el('i')]);
-    var stage = el('div', { class: 'stage', id: 'file-stage' });
-    var out = el('div', { class: 'out', id: 'file-out' });
+    var stage = el('div', { class: 'stage' });
+    var out = el('div', { class: 'out' });
     var actions = el('div', { class: 'row' });
 
     function setProgress(p) { bar.firstChild.style.width = Math.round(p * 100) + '%'; }
@@ -338,8 +343,7 @@
     function choose(f) {
       if (!f) return;
       picked = f;
-      App.dom.clear(info);
-      info.appendChild(document.createTextNode(f.name + ' — ' + fmt.bytes(f.size)));
+      info.textContent = f.name + ' — ' + fmt.bytes(f.size);
       drop.querySelector('.big-t').textContent = f.name;
       refresh();
     }
@@ -362,21 +366,16 @@
     function refresh() {
       App.dom.clear(actions);
       actions.appendChild(btn(state.fileBusy ? 'در حال رونویسی…' : 'شروع رونویسی', {
-        icon: 'wand', variant: 'primary', disabled: !picked || state.fileBusy,
-        onClick: run
+        icon: 'wand', variant: 'primary', disabled: !picked || state.fileBusy, onClick: run
       }));
       if (state.fileBusy) {
-        actions.appendChild(btn('لغو', {
-          variant: 'danger',
-          onClick: function () { App.transcribe.cancel(); }
-        }));
+        actions.appendChild(btn('لغو', { variant: 'danger', onClick: function () { App.transcribe.cancel(); } }));
       }
       var has = !!out.textContent.trim();
       actions.appendChild(btn('رونوشت', {
         icon: 'copy', disabled: !has || state.fileBusy,
         onClick: function () {
-          navigator.clipboard.writeText(out.innerText)
-            .then(function () { toast('متن رونوشت شد.', 'ok'); });
+          navigator.clipboard.writeText(out.innerText).then(function () { toast('رونوشت شد.', 'ok'); });
         }
       }));
       actions.appendChild(btn('ذخیرهٔ متن', {
@@ -385,14 +384,15 @@
           App.file.download(App.file.stem(picked ? picked.name : 'متن') + '.txt', out.innerText);
         }
       }));
+      actions.appendChild(btn('ویرایش و نقطه‌گذاری', {
+        icon: 'wand', disabled: !has || state.fileBusy,
+        onClick: function (ev) { polish(ev.currentTarget, out.innerText, out); }
+      }));
     }
 
     function run() {
-      var key = App.store.apiKey();
-      if (!key) {
-        toast('اول کلید OpenRouter را در تنظیمات وارد کنید.', 'err');
-        return;
-      }
+      var key = needGroqKey();
+      if (!key) return;
       var s = App.store.settings();
       state.fileBusy = true;
       App.dom.clear(out);
@@ -400,8 +400,7 @@
       refresh();
 
       App.transcribe.file(picked, {
-        key: key,
-        model: s.model,
+        key: key, model: s.model, language: s.language,
         chunkSeconds: Number(s.chunkSeconds) || cfg.CHUNK_SECONDS,
         onStage: function (m) { stage.textContent = m; },
         onProgress: function (done, total) { setProgress(total ? done / total : 0); },
@@ -415,9 +414,9 @@
           title: picked.name, text: res.text, source: 'file',
           model: s.model, seconds: res.duration
         });
-        if (s.autoPolish && res.text) {
+        if (s.autoPolish && res.text && App.store.apiKey()) {
           stage.textContent = 'در حال ویرایش و نقطه‌گذاری…';
-          return App.or.polish(res.text, { key: key, model: s.textModel })
+          return App.or.polish(res.text, { key: App.store.apiKey(), model: s.textModel })
             .then(function (clean) {
               if (clean) { out.textContent = clean; stage.textContent = 'انجام شد و ویرایش شد.'; }
             });
@@ -435,8 +434,8 @@
       el('h2', { text: 'رونویسی فایل صوتی' }),
       el('p', {
         class: 'hint',
-        text: 'فایل به صورت خودکار به WAV تک‌کاناله ۱۶ کیلوهرتز تبدیل، در صورت نیاز تکه‌تکه ' +
-              'و به مدل انتخابی فرستاده می‌شود. همه‌چیز داخل مرورگر شما انجام می‌شود.'
+        text: 'فایل داخل مرورگر شما به WAV تک‌کاناله ۱۶ کیلوهرتز تبدیل، در صورت نیاز ' +
+              'تکه‌تکه و به Groq فرستاده می‌شود.'
       }),
       input, drop, info, bar, stage,
       el('div', { style: 'height:10px' }),
@@ -496,8 +495,7 @@
           btn('رونوشت', {
             icon: 'copy', variant: 'ghost',
             onClick: function () {
-              navigator.clipboard.writeText(r.text)
-                .then(function () { toast('رونوشت شد.', 'ok'); });
+              navigator.clipboard.writeText(r.text).then(function () { toast('رونوشت شد.', 'ok'); });
             }
           }),
           btn('ذخیره', {
@@ -521,116 +519,121 @@
   function renderSettings(root) {
     var s = App.store.settings();
 
-    /* --- کلید --- */
-    var keyInput = el('input', {
-      type: 'password', id: 'api-key', value: App.store.apiKey(),
-      placeholder: 'sk-or-v1-…', autocomplete: 'off', spellcheck: 'false'
+    /* --- کلید Groq: موتور اصلی --- */
+    var gInput = el('input', {
+      type: 'password', value: App.store.groqKey(),
+      placeholder: 'gsk_…', autocomplete: 'off', spellcheck: 'false'
     });
-    var keyStatus = el('div', { class: 'stage' });
+    var gStatus = el('div', { class: 'stage' });
 
-    var keyCard = el('div', { class: 'card' }, [
-      el('h2', { text: 'کلید OpenRouter' }),
+    root.appendChild(el('div', { class: 'card' }, [
+      el('h2', { text: 'کلید Groq — لازم' }),
       el('p', {
         class: 'hint',
-        text: 'کلید فقط در حافظهٔ همین مرورگر ذخیره می‌شود و هیچ‌جای دیگری نمی‌رود. ' +
-              'گفتار زنده به کلید نیاز ندارد؛ کلید فقط برای رونویسی فایل و ویرایش متن لازم است.'
+        text: 'موتور تبدیل گفتار به متن. کلید رایگان از console.groq.com/keys بگیرید؛ ' +
+              'کارت بانکی نمی‌خواهد. کلید فقط در حافظهٔ همین مرورگر می‌ماند.'
       }),
-      field('کلید', keyInput),
+      field('کلید', gInput),
       el('div', { class: 'row' }, [
         btn('ذخیره', {
           icon: 'check', variant: 'primary',
-          onClick: function () {
-            App.store.apiKey(keyInput.value);
-            toast('کلید ذخیره شد.', 'ok');
-          }
+          onClick: function () { App.store.groqKey(gInput.value); toast('کلید Groq ذخیره شد.', 'ok'); }
         }),
-        btn('بررسی اعتبار', {
+        btn('بررسی کلید', {
           icon: 'key',
           onClick: function () {
-            var k = keyInput.value.trim();
+            var k = gInput.value.trim();
             if (!k) { toast('کلید خالی است.', 'err'); return; }
-            keyStatus.textContent = 'در حال بررسی…';
-            App.or.keyInfo(k).then(function (d) {
-              App.dom.clear(keyStatus);
-              var free = d.is_free_tier;
-              keyStatus.appendChild(badge(free ? 'warn' : 'good',
-                free ? 'حساب رایگان — ارسال صدا مسدود است' : 'حساب دارای اعتبار — صدا فعال است'));
-              var bits = [];
-              if (d.limit !== null && d.limit !== undefined) {
-                bits.push('سقف کلید: ' + fmt.num(d.limit, 2) + ' دلار');
-              }
-              bits.push('مصرف تاکنون: ' + fmt.num(d.usage || 0, 4) + ' دلار');
-              if (d.expires_at) bits.push('انقضا: ' + fmt.stamp(new Date(d.expires_at)));
-              keyStatus.appendChild(el('div', { style: 'margin-top:6px', text: bits.join('  •  ') }));
+            gStatus.textContent = 'در حال بررسی…';
+            App.groq.checkKey(k).then(function (d) {
+              App.dom.clear(gStatus);
+              gStatus.appendChild(badge('good', 'کلید معتبر است'));
+              gStatus.appendChild(el('div', {
+                style: 'margin-top:6px',
+                text: 'مدل‌های صوتی در دسترس: ' + d.audio.join('  •  ')
+              }));
             }).catch(function (e) {
-              App.dom.clear(keyStatus);
-              keyStatus.appendChild(badge('crit', e.message));
+              App.dom.clear(gStatus);
+              gStatus.appendChild(badge('crit', e.message));
             });
           }
         }),
-        btn('حذف کلید', {
+        btn('حذف', {
           icon: 'trash', variant: 'ghost',
-          onClick: function () {
-            App.store.apiKey(null); keyInput.value = '';
-            App.dom.clear(keyStatus);
-            toast('کلید حذف شد.');
-          }
+          onClick: function () { App.store.groqKey(null); gInput.value = ''; App.dom.clear(gStatus); }
         })
       ]),
-      keyStatus
+      gStatus
+    ]));
+
+    /* --- مدل و زبان --- */
+    var modelSel = el('select', {});
+    App.groq.MODELS.forEach(function (m) {
+      modelSel.appendChild(el('option', { value: m.id, text: m.label, selected: m.id === s.model }));
+    });
+    modelSel.addEventListener('change', function () { App.store.setSetting('model', modelSel.value); });
+
+    var langSel = el('select', {}, [
+      el('option', { value: 'fa', text: 'فارسی', selected: s.language === 'fa' }),
+      el('option', { value: 'en', text: 'انگلیسی', selected: s.language === 'en' }),
+      el('option', { value: 'auto', text: 'تشخیص خودکار', selected: s.language === 'auto' })
     ]);
+    langSel.addEventListener('change', function () { App.store.setSetting('language', langSel.value); });
 
-    /* --- مدل‌ها --- */
-    var modelSel = el('select', { id: 'model-sel' }, [
-      el('option', { value: s.model, text: s.model, selected: true })
-    ]);
-    modelSel.addEventListener('change', function () {
-      App.store.setSetting('model', modelSel.value);
+    var liveChunk = el('input', { type: 'number', min: '3', max: '30', step: '1', value: String(s.liveChunkSeconds) });
+    liveChunk.addEventListener('change', function () {
+      App.store.setSetting('liveChunkSeconds', Number(liveChunk.value) || cfg.LIVE_CHUNK_SECONDS);
     });
 
-    // فهرست را زنده از OpenRouter می‌گیریم تا با اضافه شدن مدل صوتی جدید، اپ خودش به‌روز شود
-    App.or.listAudioModels().then(function (models) {
-      App.dom.clear(modelSel);
-      models.forEach(function (m) {
-        var price = m.free ? 'رایگان' : ('$' + m.price.toFixed(6) + ' هر توکن صدا');
-        modelSel.appendChild(el('option', {
-          value: m.id, text: m.name + ' — ' + price, selected: m.id === s.model
-        }));
-      });
-      if (!models.some(function (m) { return m.id === s.model; })) {
-        modelSel.appendChild(el('option', { value: s.model, text: s.model, selected: true }));
-      }
-    }).catch(function () {
-      // آفلاین یا خطای شبکه: همان مقدار ذخیره‌شده می‌ماند
-    });
+    root.appendChild(el('div', { class: 'card' }, [
+      el('h2', { text: 'رونویسی' }),
+      el('div', { class: 'grid' }, [
+        field('مدل', modelSel),
+        field('زبان گفتار', langSel),
+        field('طول تکه در حالت زنده (ثانیه)', liveChunk)
+      ]),
+      el('p', {
+        class: 'hint', style: 'margin:0',
+        text: 'تکهٔ کوتاه‌تر یعنی متن زودتر ظاهر می‌شود ولی درخواست بیشتری می‌رود و ' +
+              'دقت جمله‌های بریده کمی پایین می‌آید. شش ثانیه تعادل خوبی است.'
+      })
+    ]));
 
-    var textSel = el('input', { type: 'text', value: s.textModel });
-    textSel.addEventListener('change', function () {
-      App.store.setSetting('textModel', textSel.value.trim());
+    /* --- OpenRouter: اختیاری، فقط برای ویرایش متن --- */
+    var oInput = el('input', {
+      type: 'password', value: App.store.apiKey(),
+      placeholder: 'sk-or-v1-…', autocomplete: 'off', spellcheck: 'false'
     });
-
-    var chunkInput = el('input', {
-      type: 'number', min: '15', max: '600', step: '15', value: String(s.chunkSeconds)
+    var textModel = el('input', { type: 'text', value: s.textModel });
+    textModel.addEventListener('change', function () {
+      App.store.setSetting('textModel', textModel.value.trim());
     });
-    chunkInput.addEventListener('change', function () {
-      App.store.setSetting('chunkSeconds', Number(chunkInput.value) || cfg.CHUNK_SECONDS);
-    });
-
     var autoCheck = el('input', { type: 'checkbox', checked: s.autoPolish });
     autoCheck.addEventListener('change', function () {
       App.store.setSetting('autoPolish', autoCheck.checked);
     });
 
-    var modelCard = el('div', { class: 'card' }, [
-      el('h2', { text: 'مدل‌ها' }),
-      el('p', { class: 'hint', text: 'فهرست مدل‌های صوتی زنده از OpenRouter خوانده می‌شود.' }),
-      el('div', { class: 'grid' }, [
-        field('مدل رونویسی صدا', modelSel),
-        field('مدل ویرایش متن', textSel),
-        field('طول هر تکه (ثانیه)', chunkInput)
-      ]),
-      el('label', { class: 'check' }, [autoCheck, 'بعد از رونویسی، متن را خودکار ویرایش و نقطه‌گذاری کن'])
-    ]);
+    root.appendChild(el('div', { class: 'card' }, [
+      el('h2', { text: 'کلید OpenRouter — اختیاری' }),
+      el('p', {
+        class: 'hint',
+        text: 'فقط برای دکمهٔ «ویرایش و نقطه‌گذاری». مدل‌های متنی رایگان OpenRouter ' +
+              'بدون هیچ موجودی کار می‌کنند. بدون این کلید، بقیهٔ اپ کامل کار می‌کند.'
+      }),
+      field('کلید', oInput),
+      field('مدل ویرایش متن', textModel),
+      el('label', { class: 'check' }, [autoCheck, 'بعد از رونویسی فایل، متن را خودکار ویرایش کن']),
+      el('div', { class: 'row', style: 'margin-top:12px' }, [
+        btn('ذخیره', {
+          icon: 'check',
+          onClick: function () { App.store.apiKey(oInput.value); toast('ذخیره شد.', 'ok'); }
+        }),
+        btn('حذف', {
+          icon: 'trash', variant: 'ghost',
+          onClick: function () { App.store.apiKey(null); oInput.value = ''; }
+        })
+      ])
+    ]));
 
     /* --- پوسته --- */
     var themeSel = el('select', {}, [
@@ -639,15 +642,10 @@
       el('option', { value: 'dark', text: 'تاریک', selected: s.theme === 'dark' })
     ]);
     themeSel.addEventListener('change', function () { applyTheme(themeSel.value); });
+    root.appendChild(el('div', { class: 'card' }, [
+      el('h2', { text: 'ظاهر' }), field('پوسته', themeSel)
+    ]));
 
-    var themeCard = el('div', { class: 'card' }, [
-      el('h2', { text: 'ظاهر' }),
-      field('پوسته', themeSel)
-    ]);
-
-    root.appendChild(keyCard);
-    root.appendChild(modelCard);
-    root.appendChild(themeCard);
     return root;
   }
 
@@ -692,10 +690,7 @@
         'aria-selected': String(state.tab === t.id),
         onclick: function () {
           // وسط ضبط، جابه‌جایی زبانه ضبط را قطع می‌کند
-          if (state.live && state.live.running) {
-            toast('اول ضبط را متوقف کنید.', 'err');
-            return;
-          }
+          if (state.rec && state.rec.running) { toast('اول ضبط را متوقف کنید.', 'err'); return; }
           state.tab = t.id;
           render();
         }
@@ -709,6 +704,12 @@
     host.appendChild(head);
     host.appendChild(tabs);
     host.appendChild(body);
+
+    // اولین بار: اگر کلیدی نیست، کاربر را مستقیم ببر سراغ تنظیمات
+    if (!App.store.groqKey() && state.tab === 'live' && !state._nagged) {
+      state._nagged = true;
+      toast('برای شروع، کلید Groq را در زبانهٔ تنظیمات وارد کنید.');
+    }
   }
 
   App.ui = {
@@ -721,7 +722,7 @@
     render: render,
     toast: toast,
     applyTheme: applyTheme,
-    isRecording: function () { return !!(state.live && state.live.running); }
+    isRecording: function () { return !!(state.rec && state.rec.running); }
   };
 
 })(window.App = window.App || {});
