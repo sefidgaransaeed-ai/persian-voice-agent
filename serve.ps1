@@ -80,18 +80,53 @@ function Send-Response {
   $stream.Flush()
 }
 
+# مرورگرها اتصال‌ها را از پیش باز می‌کنند و اغلب هیچ درخواستی روی آن‌ها نمی‌فرستند.
+# این حلقه تک‌رشته‌ای است، پس هر انتظاری روی یک اتصالِ ساکت، بقیه را هم می‌خواباند.
+# راه‌حل: هیچ‌وقت روی یک اتصال منتظر نمی‌مانیم. اتصال‌های پذیرفته‌شده در یک صف
+# می‌نشینند و هر دور فقط آن‌هایی رسیدگی می‌شوند که دادهٔ آماده دارند؛ بقیه بعد از
+# مهلتشان دور انداخته می‌شوند.
+$queue = New-Object System.Collections.ArrayList
+
 try {
   while ($true) {
-    # AcceptTcpClient روی یک شنونده بلوکه می‌شود و شنوندهٔ دیگر را گرسنه می‌گذارد،
-    # پس نوبتی سرک می‌کشیم و فقط وقتی درخواستی در صف باشد accept می‌کنیم.
-    $ready = $null
-    foreach ($l in $listeners) { if ($l.Pending()) { $ready = $l; break } }
-    if (-not $ready) { Start-Sleep -Milliseconds 15; continue }
+    $did = $false
 
-    $client = $ready.AcceptTcpClient()
+    # ۱) اتصال‌های تازه را بدون انتظار بردار
+    foreach ($l in $listeners) {
+      while ($l.Pending()) {
+        $c = $l.AcceptTcpClient()
+        $c.ReceiveTimeout = 5000
+        $c.SendTimeout = 5000
+        [void]$queue.Add([pscustomobject]@{
+          Client = $c
+          Expires = (Get-Date).AddSeconds(10)
+        })
+        $did = $true
+      }
+    }
+
+    # ۲) فقط آن‌هایی را که حرفی برای گفتن دارند رسیدگی کن
+    for ($i = $queue.Count - 1; $i -ge 0; $i--) {
+      $item = $queue[$i]
+      $client = $item.Client
+      $ready = $false
+      try { $ready = $client.Connected -and $client.GetStream().DataAvailable } catch { }
+
+      if (-not $ready) {
+        if ((Get-Date) -ge $item.Expires -or -not $client.Connected) {
+          try { $client.Close() } catch { }
+          $queue.RemoveAt($i)
+        }
+        continue
+      }
+
+      $queue.RemoveAt($i)
+      $did = $true
+
     try {
-      $client.ReceiveTimeout = 5000
       $stream = $client.GetStream()
+      $stream.ReadTimeout = 5000
+      $stream.WriteTimeout = 5000
 
       # فقط خط اول درخواست را لازم داریم
       $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::ASCII)
@@ -145,8 +180,13 @@ try {
     } finally {
       try { $client.Close() } catch { }
     }
+    } # پایان حلقهٔ صف
+
+    # فقط وقتی هیچ کاری نبود می‌خوابیم؛ وگرنه بی‌درنگ دور بعد
+    if (-not $did) { Start-Sleep -Milliseconds 10 }
   }
 } finally {
+  foreach ($item in $queue) { try { $item.Client.Close() } catch { } }
   foreach ($l in $listeners) { try { $l.Stop() } catch { } }
   Write-Host "`nسرور متوقف شد." -ForegroundColor Cyan
 }
