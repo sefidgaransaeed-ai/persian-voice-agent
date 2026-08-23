@@ -90,31 +90,56 @@
     return go();
   }
 
-  /* پرامپت جهت‌دهی می‌سازد: واژه‌نامهٔ کاربر + نمونهٔ سبک + دُمِ متن قبلی.
-     دُمِ متن قبلی مهم‌ترین بخش است — به Whisper بافت می‌دهد تا واژهٔ لبِ برش را
-     درست بشنود و رشتهٔ جمله را ادامه بدهد. سقف ۲۲۴ توکن است، پس کوتاه نگه
-     داشته می‌شود؛ بلندتر از آن کل درخواست رد می‌شود. */
-  function buildPrompt(previousText, glossary) {
+  /* پرامپت جهت‌دهی می‌سازد — عمداً محافظه‌کارانه.
+     هرچه اینجا برود، Whisper ممکن است روی صدای ضعیف عیناً ادامه‌اش بدهد و
+     متنی بسازد که کاربر نگفته. پس پیش‌فرض فقط واژه‌نامه است: فهرست اسم، نه
+     جملهٔ قابل ادامه دادن. بافتِ متن قبلی فقط اگر کاربر صریحاً بخواهد. */
+  function buildPrompt(previousText, glossary, useContext) {
     var cfg = App.config;
     var parts = [];
     if (glossary && glossary.trim()) parts.push(glossary.trim());
-    parts.push(cfg.PROMPT_SEED);
 
-    var tail = String(previousText || '').trim();
-    if (tail) {
-      var room = cfg.PROMPT_MAX_CHARS - parts.join(' ').length - 1;
-      if (room > 40) parts.push(tail.slice(-room));
+    if (useContext) {
+      var tail = String(previousText || '').trim();
+      if (tail) {
+        var room = cfg.PROMPT_MAX_CHARS - parts.join(' ').length - 1;
+        if (room > 40) parts.push(tail.slice(-room));
+      }
     }
     return parts.join(' ').slice(-cfg.PROMPT_MAX_CHARS);
+  }
+
+  /* نگهبان توهم: اگر خروجی چیزی جز بازگفتِ پرامپت نباشد، دور انداخته می‌شود.
+     نشانهٔ همان حالتی است که مدل به‌جای شنیدن، متن ورودی را ادامه داده. */
+  function echoesPrompt(text, prompt) {
+    if (!text || !prompt) return false;
+    var norm = function (s) { return s.replace(/[\s‌.،,؛:!?]+/g, ' ').trim(); };
+    var t = norm(text), p = norm(prompt);
+    if (!t) return false;
+    if (p.indexOf(t) !== -1 && t.length > 8) return true;
+    // تکرار یک عبارت پشت سر هم، الگوی کلاسیک توهم روی سکوت است
+    var w = t.split(' ');
+    if (w.length >= 6) {
+      var uniq = {};
+      w.forEach(function (x) { uniq[x] = 1; });
+      if (Object.keys(uniq).length <= Math.ceil(w.length / 4)) return true;
+    }
+    return false;
   }
 
   App.groq = {
     MODELS: MODELS,
     buildPrompt: buildPrompt,
 
+    echoesPrompt: echoesPrompt,
+
     transcribe: function (blob, opts) {
       opts = opts || {};
-      return withRetry(function () { return transcribeBlob(blob, opts); }, opts.onNotice);
+      return withRetry(function () { return transcribeBlob(blob, opts); }, opts.onNotice)
+        .then(function (text) {
+          // بهتر است چیزی ننویسیم تا اینکه جمله‌ای بنویسیم که گفته نشده
+          return echoesPrompt(text, opts.prompt) ? '' : text;
+        });
     },
 
     // بررسی درستی کلید بدون مصرف سهمیهٔ صوتی

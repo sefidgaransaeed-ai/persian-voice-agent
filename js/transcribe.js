@@ -57,7 +57,7 @@
             model: opts.model,
             language: opts.language,
             // دُمِ متن تکه‌های قبلی، تا رشتهٔ جمله بین تکه‌ها پاره نشود
-            prompt: App.groq.buildPrompt(out, opts.glossary),
+            prompt: App.groq.buildPrompt(out, opts.glossary, opts.useContext),
             filename: 'chunk' + i + '.wav',
             onNotice: stage
           }).then(function (text) {

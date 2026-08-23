@@ -198,8 +198,7 @@
 
       rec.on.chunk = function (blob, index) {
         state.pending++;
-        // دُمِ متنِ تا اینجا به‌عنوان بافت می‌رود تا واژهٔ لبِ برش درست شنیده شود
-        var context = App.groq.buildPrompt(joined(), s.glossary);
+        var context = App.groq.buildPrompt(joined(), s.glossary, s.useContext);
         state.parts[index] = state.parts[index] || '';
         paint();
         App.groq.transcribe(blob, {
@@ -402,7 +401,7 @@
       refresh();
 
       App.transcribe.file(picked, {
-        key: key, model: s.model, language: s.language, glossary: s.glossary,
+        key: key, model: s.model, language: s.language, glossary: s.glossary, useContext: s.useContext,
         chunkSeconds: Number(s.chunkSeconds) || cfg.CHUNK_SECONDS,
         onStage: function (m) { stage.textContent = m; },
         onProgress: function (done, total) { setProgress(total ? done / total : 0); },
@@ -597,6 +596,11 @@
       toast('واژه‌نامه ذخیره شد.', 'ok');
     });
 
+    var ctxCheck = el('input', { type: 'checkbox', checked: s.useContext });
+    ctxCheck.addEventListener('change', function () {
+      App.store.setSetting('useContext', ctxCheck.checked);
+    });
+
     root.appendChild(el('div', { class: 'card' }, [
       el('h2', { text: 'رونویسی' }),
       el('div', { class: 'grid' }, [
@@ -611,10 +615,13 @@
       }),
       field('واژه‌نامه — نام‌ها و اصطلاحاتی که مدام غلط شنیده می‌شوند', glossary),
       el('p', {
-        class: 'hint', style: 'margin:0',
-        text: 'این واژه‌ها همراه هر درخواست به مدل داده می‌شوند تا املایشان را بداند. ' +
-              'کوتاه نگهش دارید؛ فهرست بلند اثر معکوس دارد.'
-      })
+        class: 'hint',
+        text: 'فقط فهرست اسم بنویسید، نه جملهٔ کامل. مدل هرچه اینجا ببیند ممکن است ' +
+              'روی صدای ضعیف ادامه‌اش بدهد، و جملهٔ کامل یعنی متنی که شما نگفته‌اید.'
+      }),
+      el('label', { class: 'check' }, [
+        ctxCheck, 'متن قبلی را به‌عنوان بافت بفرست (دقت مرزها بهتر، ولی خطر ساختن متن نگفته)'
+      ])
     ]));
 
     /* --- OpenRouter: اختیاری، فقط برای ویرایش متن --- */

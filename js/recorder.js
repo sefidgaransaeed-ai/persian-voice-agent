@@ -108,6 +108,15 @@
     });
   };
 
+  // انرژی مؤثر تکه. تکهٔ ساکت نباید فرستاده شود: Whisper روی سکوت
+  // به‌جای برگرداندن رشتهٔ خالی، از خودش متن درمی‌آورد.
+  function rms(samples) {
+    if (!samples.length) return 0;
+    var sum = 0;
+    for (var i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+    return Math.sqrt(sum / samples.length);
+  }
+
   // تکهٔ جمع‌شده را جدا و به بیرون می‌دهد، با کمی همپوشانی برای واژهٔ لبِ برش
   Recorder.prototype.cut = function (lapLen) {
     var merged = merge(this.buffer, this.bufferLen);
@@ -119,6 +128,11 @@
 
     this.buffer = keep.length ? [keep] : [];
     this.bufferLen = keep.length;
+
+    if (rms(merged) < cfg.SILENCE_RMS) {
+      this.emit('silent');
+      return;
+    }
 
     var self = this;
     var index = this.seq++;

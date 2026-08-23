@@ -34,6 +34,7 @@
     chunkSeconds: App.config.CHUNK_SECONDS,
     language: App.config.LANGUAGE,
     glossary: '',          // نام‌ها و اصطلاحات کاربر، برای جهت‌دهی به Whisper
+    useContext: false,     // بافتِ متن قبلی — خاموش، چون باعث ساختن متن نگفته می‌شود
     autoPolish: false,
     theme: 'system'
   };
