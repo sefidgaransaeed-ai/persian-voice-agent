@@ -2,7 +2,7 @@
 (function (App) {
   'use strict';
 
-  var K_GROQ = 'fa-voice.groqKey';
+  var K_DG   = 'fa-voice.dgKey';
   var K_OR   = 'fa-voice.apiKey';
   var K_SET  = 'fa-voice.settings';
   var K_ARC  = 'fa-voice.archive';
@@ -28,19 +28,18 @@
   }
 
   var DEFAULTS = {
-    model: App.config.GROQ_MODEL,
+    model: App.config.DG_MODEL,
     textModel: App.config.TEXT_MODEL,
     liveChunkSeconds: App.config.LIVE_CHUNK_SECONDS,
     chunkSeconds: App.config.CHUNK_SECONDS,
     language: App.config.LANGUAGE,
-    glossary: '',          // نام‌ها و اصطلاحات کاربر، برای جهت‌دهی به Whisper
-    useContext: false,     // بافتِ متن قبلی — خاموش، چون باعث ساختن متن نگفته می‌شود
+    glossary: '',          // نام‌ها و اصطلاحات کاربر → keyterm در Deepgram
     autoPolish: false,
     theme: 'system'
   };
 
   App.store = {
-    groqKey: keyAccessor(K_GROQ),
+    dgKey: keyAccessor(K_DG),
     apiKey: keyAccessor(K_OR),        // OpenRouter — فقط برای ویرایش متن
 
     settings: function () {
@@ -52,9 +51,9 @@
 
       // مقدار ذخیره‌شده بر پیش‌فرض مقدم است، پس تنظیمات نسخه‌های قبلی زنده
       // می‌مانند. نسخهٔ OpenRouter نام مدل صوتی خودش را ذخیره کرده بود و پس از
-      // تعویض موتور، همان به Groq می‌رفت و خطای ۴۰۴ می‌گرفت. هر مقدار ناشناخته
+      // تعویض موتور، همان به موتور جدید می‌رفت و خطا می‌گرفت. هر مقدار ناشناخته
       // به پیش‌فرض برمی‌گردد.
-      if (!App.config.GROQ_MODELS.some(function (m) { return m.id === out.model; })) {
+      if (!App.config.DG_MODELS.some(function (m) { return m.id === out.model; })) {
         out.model = DEFAULTS.model;
       }
       if (['fa', 'en', 'auto'].indexOf(out.language) === -1) out.language = DEFAULTS.language;

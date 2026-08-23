@@ -1,6 +1,6 @@
 /* پردازش صدا — همه‌چیز دستی، بدون کتابخانه.
-   چرا لازم است: OpenRouter فقط wav و mp3 را آن هم base64 می‌پذیرد، ولی
-   MediaRecorder مرورگر webm/opus می‌دهد و فایل‌های کاربر m4a/ogg/… هستند.
+   چرا لازم است: MediaRecorder مرورگر webm/opus می‌دهد و فایل‌های کاربر m4a/ogg
+   هستند. یک قالب واحد و کم‌حجم لازم است که همه‌جا قابل اتکا باشد.
    پس هر ورودی را رمزگشایی، تک‌کاناله و به ۱۶ کیلوهرتز تبدیل و به WAV تبدیل می‌کنیم. */
 (function (App) {
   'use strict';
@@ -137,7 +137,7 @@
     },
 
     /* همان مسیر، ولی خروجی Blob است نه base64.
-       Groq فایل را با multipart می‌گیرد، پس base64 فقط حجم را ۳۳٪ باد می‌کرد. */
+       Deepgram بدنهٔ خام صوتی می‌گیرد، پس base64 فقط حجم را ۳۳٪ باد می‌کرد. */
     prepareBlobs: function (blob, seconds) {
       return decode(blob)
         .then(toMono16k)

@@ -1,4 +1,4 @@
-/* هماهنگ‌کنندهٔ رونویسی فایل: آماده‌سازی صدا، ارسال تکه‌به‌تکه به Groq، دوختن نتیجه */
+/* هماهنگ‌کنندهٔ رونویسی فایل: آماده‌سازی صدا، ارسال تکه‌به‌تکه به Deepgram، دوختن نتیجه */
 (function (App) {
   'use strict';
 
@@ -40,7 +40,7 @@
         var out = '';
         var i = 0;
 
-        stage(total === 1 ? 'ارسال به Groq…'
+        stage(total === 1 ? 'ارسال به Deepgram…'
                           : 'صدا به ' + App.fmt.fa(total) + ' تکه تقسیم شد.');
 
         function step() {
@@ -52,13 +52,12 @@
           stage('رونویسی تکهٔ ' + App.fmt.fa(i + 1) + ' از ' + App.fmt.fa(total) +
                 ' (' + App.fmt.dur(c.start) + ' تا ' + App.fmt.dur(c.end) + ')…');
 
-          return App.groq.transcribe(c.blob, {
+          return App.dg.transcribe(c.blob, {
             key: opts.key,
             model: opts.model,
             language: opts.language,
-            // دُمِ متن تکه‌های قبلی، تا رشتهٔ جمله بین تکه‌ها پاره نشود
-            prompt: App.groq.buildPrompt(out, opts.glossary, opts.useContext),
-            filename: 'chunk' + i + '.wav',
+            // Deepgram اصطلاحات را با keyterm می‌گیرد، نه با پرامپتِ قابل ادامه دادن
+            glossary: opts.glossary,
             onNotice: stage
           }).then(function (text) {
             out = stitch(out, text);

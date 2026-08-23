@@ -91,10 +91,10 @@
   function field(labelText, control) {
     return el('label', { class: 'field' }, [el('span', { text: labelText }), control]);
   }
-  function needGroqKey() {
-    var k = App.store.groqKey();
+  function needKey() {
+    var k = App.store.dgKey();
     if (!k) {
-      toast('اول کلید Groq را در زبانهٔ تنظیمات وارد کنید.', 'err');
+      toast('اول کلید Deepgram را در زبانهٔ تنظیمات وارد کنید.', 'err');
       return null;
     }
     return k;
@@ -170,7 +170,7 @@
         state.rec.stop();
         return;
       }
-      var key = needGroqKey();
+      var key = needKey();
       if (!key) return;
 
       var s = App.store.settings();
@@ -198,12 +198,10 @@
 
       rec.on.chunk = function (blob, index) {
         state.pending++;
-        var context = App.groq.buildPrompt(joined(), s.glossary, s.useContext);
         state.parts[index] = state.parts[index] || '';
         paint();
-        App.groq.transcribe(blob, {
-          key: key, model: s.model, language: s.language,
-          prompt: context, filename: 'live' + index + '.wav'
+        App.dg.transcribe(blob, {
+          key: key, model: s.model, language: s.language, glossary: s.glossary
         }).then(function (text) {
           state.parts[index] = text || '';
         }).catch(function (e) {
@@ -286,7 +284,7 @@
       el('h2', { text: 'گفتار زندهٔ فارسی' }),
       el('p', {
         class: 'hint',
-        text: 'دکمه را بزنید و فارسی حرف بزنید. صدا هر چند ثانیه یک بار به Groq فرستاده ' +
+        text: 'دکمه را بزنید و فارسی حرف بزنید. صدا هر چند ثانیه یک بار به Deepgram فرستاده ' +
               'می‌شود و متن پشت سر هم اضافه می‌شود — یکی دو ثانیه تأخیر طبیعی است.'
       }),
       el('div', { class: 'mic-wrap' }, [micBtn, meter, stateLine]),
@@ -392,7 +390,7 @@
     }
 
     function run() {
-      var key = needGroqKey();
+      var key = needKey();
       if (!key) return;
       var s = App.store.settings();
       state.fileBusy = true;
@@ -401,7 +399,7 @@
       refresh();
 
       App.transcribe.file(picked, {
-        key: key, model: s.model, language: s.language, glossary: s.glossary, useContext: s.useContext,
+        key: key, model: s.model, language: s.language, glossary: s.glossary,
         chunkSeconds: Number(s.chunkSeconds) || cfg.CHUNK_SECONDS,
         onStage: function (m) { stage.textContent = m; },
         onProgress: function (done, total) { setProgress(total ? done / total : 0); },
@@ -436,7 +434,7 @@
       el('p', {
         class: 'hint',
         text: 'فایل داخل مرورگر شما به WAV تک‌کاناله ۱۶ کیلوهرتز تبدیل، در صورت نیاز ' +
-              'تکه‌تکه و به Groq فرستاده می‌شود.'
+              'تکه‌تکه و به Deepgram فرستاده می‌شود.'
       }),
       input, drop, info, bar, stage,
       el('div', { style: 'height:10px' }),
@@ -520,25 +518,25 @@
   function renderSettings(root) {
     var s = App.store.settings();
 
-    /* --- کلید Groq: موتور اصلی --- */
+    /* --- کلید Deepgram: موتور اصلی --- */
     var gInput = el('input', {
-      type: 'password', value: App.store.groqKey(),
+      type: 'password', value: App.store.dgKey(),
       placeholder: 'gsk_…', autocomplete: 'off', spellcheck: 'false'
     });
     var gStatus = el('div', { class: 'stage' });
 
     root.appendChild(el('div', { class: 'card' }, [
-      el('h2', { text: 'کلید Groq — لازم' }),
+      el('h2', { text: 'کلید Deepgram — لازم' }),
       el('p', {
         class: 'hint',
-        text: 'موتور تبدیل گفتار به متن. کلید رایگان از console.groq.com/keys بگیرید؛ ' +
+        text: 'موتور تبدیل گفتار به متن. کلید رایگان از console.deepgram.com بگیرید؛ ' +
               'کارت بانکی نمی‌خواهد. کلید فقط در حافظهٔ همین مرورگر می‌ماند.'
       }),
       field('کلید', gInput),
       el('div', { class: 'row' }, [
         btn('ذخیره', {
           icon: 'check', variant: 'primary',
-          onClick: function () { App.store.groqKey(gInput.value); toast('کلید Groq ذخیره شد.', 'ok'); }
+          onClick: function () { App.store.dgKey(gInput.value); toast('کلید Deepgram ذخیره شد.', 'ok'); }
         }),
         btn('بررسی کلید', {
           icon: 'key',
@@ -546,7 +544,7 @@
             var k = gInput.value.trim();
             if (!k) { toast('کلید خالی است.', 'err'); return; }
             gStatus.textContent = 'در حال بررسی…';
-            App.groq.checkKey(k).then(function (d) {
+            App.dg.checkKey(k).then(function (d) {
               App.dom.clear(gStatus);
               gStatus.appendChild(badge('good', 'کلید معتبر است'));
               gStatus.appendChild(el('div', {
@@ -561,7 +559,7 @@
         }),
         btn('حذف', {
           icon: 'trash', variant: 'ghost',
-          onClick: function () { App.store.groqKey(null); gInput.value = ''; App.dom.clear(gStatus); }
+          onClick: function () { App.store.dgKey(null); gInput.value = ''; App.dom.clear(gStatus); }
         })
       ]),
       gStatus
@@ -569,7 +567,7 @@
 
     /* --- مدل و زبان --- */
     var modelSel = el('select', {});
-    App.groq.MODELS.forEach(function (m) {
+    App.dg.MODELS.forEach(function (m) {
       modelSel.appendChild(el('option', { value: m.id, text: m.label, selected: m.id === s.model }));
     });
     modelSel.addEventListener('change', function () { App.store.setSetting('model', modelSel.value); });
@@ -596,10 +594,6 @@
       toast('واژه‌نامه ذخیره شد.', 'ok');
     });
 
-    var ctxCheck = el('input', { type: 'checkbox', checked: s.useContext });
-    ctxCheck.addEventListener('change', function () {
-      App.store.setSetting('useContext', ctxCheck.checked);
-    });
 
     root.appendChild(el('div', { class: 'card' }, [
       el('h2', { text: 'رونویسی' }),
@@ -616,12 +610,9 @@
       field('واژه‌نامه — نام‌ها و اصطلاحاتی که مدام غلط شنیده می‌شوند', glossary),
       el('p', {
         class: 'hint',
-        text: 'فقط فهرست اسم بنویسید، نه جملهٔ کامل. مدل هرچه اینجا ببیند ممکن است ' +
-              'روی صدای ضعیف ادامه‌اش بدهد، و جملهٔ کامل یعنی متنی که شما نگفته‌اید.'
-      }),
-      el('label', { class: 'check' }, [
-        ctxCheck, 'متن قبلی را به‌عنوان بافت بفرست (دقت مرزها بهتر، ولی خطر ساختن متن نگفته)'
-      ])
+        text: 'فهرست اسم و اصطلاح، با ویرگول جدا. Deepgram این‌ها را به‌عنوان keyterm ' +
+              'می‌گیرد و شنیدنشان را تقویت می‌کند. مثلاً «ویکی‌پدیا» که غلط شنیده می‌شد.'
+      })
     ]));
 
     /* --- OpenRouter: اختیاری، فقط برای ویرایش متن --- */
@@ -731,9 +722,9 @@
     host.appendChild(body);
 
     // اولین بار: اگر کلیدی نیست، کاربر را مستقیم ببر سراغ تنظیمات
-    if (!App.store.groqKey() && state.tab === 'live' && !state._nagged) {
+    if (!App.store.dgKey() && state.tab === 'live' && !state._nagged) {
       state._nagged = true;
-      toast('برای شروع، کلید Groq را در زبانهٔ تنظیمات وارد کنید.');
+      toast('برای شروع، کلید Deepgram را در زبانهٔ تنظیمات وارد کنید.');
     }
   }
 
