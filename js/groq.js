@@ -17,6 +17,10 @@
   function friendlyError(status, body) {
     var msg = (body && body.error && body.error.message) || '';
     if (status === 401) return 'کلید Groq پذیرفته نشد. در تنظیمات کلید درست را وارد کنید.';
+    // ۴۰۳ اینجا تقریباً همیشه یعنی کشورِ آی‌پی، نه کلید. با تعویض گرهٔ VPN
+    // (مثلاً از آذربایجان به آلمان) درست می‌شود — این را واقعاً دیدیم.
+    if (status === 403) return 'Groq از کشورِ آی‌پی فعلی شما سرویس نمی‌دهد. ' +
+                              'گرهٔ VPN را روی آلمان یا کشوری در اروپای غربی / آمریکا بگذارید.';
     if (status === 404) return 'این مدل در Groq وجود ندارد. در تنظیمات یکی از مدل‌های فهرست را انتخاب کنید.';
     if (status === 413) return 'فایل صوتی بزرگ‌تر از سقف مجاز است. طول تکه‌ها را در تنظیمات کم کنید.';
     if (status === 429) return 'به سقف درخواست Groq رسیدید. کمی صبر کنید.';
@@ -86,8 +90,27 @@
     return go();
   }
 
+  /* پرامپت جهت‌دهی می‌سازد: واژه‌نامهٔ کاربر + نمونهٔ سبک + دُمِ متن قبلی.
+     دُمِ متن قبلی مهم‌ترین بخش است — به Whisper بافت می‌دهد تا واژهٔ لبِ برش را
+     درست بشنود و رشتهٔ جمله را ادامه بدهد. سقف ۲۲۴ توکن است، پس کوتاه نگه
+     داشته می‌شود؛ بلندتر از آن کل درخواست رد می‌شود. */
+  function buildPrompt(previousText, glossary) {
+    var cfg = App.config;
+    var parts = [];
+    if (glossary && glossary.trim()) parts.push(glossary.trim());
+    parts.push(cfg.PROMPT_SEED);
+
+    var tail = String(previousText || '').trim();
+    if (tail) {
+      var room = cfg.PROMPT_MAX_CHARS - parts.join(' ').length - 1;
+      if (room > 40) parts.push(tail.slice(-room));
+    }
+    return parts.join(' ').slice(-cfg.PROMPT_MAX_CHARS);
+  }
+
   App.groq = {
     MODELS: MODELS,
+    buildPrompt: buildPrompt,
 
     transcribe: function (blob, opts) {
       opts = opts || {};

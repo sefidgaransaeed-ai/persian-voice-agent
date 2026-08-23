@@ -198,11 +198,13 @@
 
       rec.on.chunk = function (blob, index) {
         state.pending++;
+        // دُمِ متنِ تا اینجا به‌عنوان بافت می‌رود تا واژهٔ لبِ برش درست شنیده شود
+        var context = App.groq.buildPrompt(joined(), s.glossary);
         state.parts[index] = state.parts[index] || '';
         paint();
         App.groq.transcribe(blob, {
           key: key, model: s.model, language: s.language,
-          filename: 'live' + index + '.wav'
+          prompt: context, filename: 'live' + index + '.wav'
         }).then(function (text) {
           state.parts[index] = text || '';
         }).catch(function (e) {
@@ -400,7 +402,7 @@
       refresh();
 
       App.transcribe.file(picked, {
-        key: key, model: s.model, language: s.language,
+        key: key, model: s.model, language: s.language, glossary: s.glossary,
         chunkSeconds: Number(s.chunkSeconds) || cfg.CHUNK_SECONDS,
         onStage: function (m) { stage.textContent = m; },
         onProgress: function (done, total) { setProgress(total ? done / total : 0); },
@@ -585,6 +587,16 @@
       App.store.setSetting('liveChunkSeconds', Number(liveChunk.value) || cfg.LIVE_CHUNK_SECONDS);
     });
 
+    var glossary = el('textarea', {
+      rows: '3',
+      placeholder: 'مثال: سعید سفیدگران، شرکت پیشگامان، پروژهٔ فاز دو، PMBOK، پرتفوی'
+    });
+    glossary.value = s.glossary || '';
+    glossary.addEventListener('change', function () {
+      App.store.setSetting('glossary', glossary.value);
+      toast('واژه‌نامه ذخیره شد.', 'ok');
+    });
+
     root.appendChild(el('div', { class: 'card' }, [
       el('h2', { text: 'رونویسی' }),
       el('div', { class: 'grid' }, [
@@ -593,9 +605,15 @@
         field('طول تکه در حالت زنده (ثانیه)', liveChunk)
       ]),
       el('p', {
+        class: 'hint',
+        text: 'تکهٔ کوتاه‌تر یعنی متن زودتر ظاهر می‌شود، ولی مدل بافت کمتری دارد و ' +
+              'بیشتر اشتباه می‌کند. پانزده ثانیه تعادل خوبی است.'
+      }),
+      field('واژه‌نامه — نام‌ها و اصطلاحاتی که مدام غلط شنیده می‌شوند', glossary),
+      el('p', {
         class: 'hint', style: 'margin:0',
-        text: 'تکهٔ کوتاه‌تر یعنی متن زودتر ظاهر می‌شود ولی درخواست بیشتری می‌رود و ' +
-              'دقت جمله‌های بریده کمی پایین می‌آید. شش ثانیه تعادل خوبی است.'
+        text: 'این واژه‌ها همراه هر درخواست به مدل داده می‌شوند تا املایشان را بداند. ' +
+              'کوتاه نگهش دارید؛ فهرست بلند اثر معکوس دارد.'
       })
     ]));
 

@@ -33,6 +33,7 @@
     liveChunkSeconds: App.config.LIVE_CHUNK_SECONDS,
     chunkSeconds: App.config.CHUNK_SECONDS,
     language: App.config.LANGUAGE,
+    glossary: '',          // نام‌ها و اصطلاحات کاربر، برای جهت‌دهی به Whisper
     autoPolish: false,
     theme: 'system'
   };
