@@ -24,6 +24,23 @@
     return 'خطای OpenRouter' + (status ? ' (' + status + ')' : '') + (msg ? ': ' + msg : '');
   }
 
+  /* واژه‌نامهٔ کاربر به پرامپت ویرایش هم می‌رود، نه فقط به keyterm در Deepgram.
+     مرحلهٔ ویرایش دقیقاً همان‌جاست که می‌شود نام خاصِ بدشنیده‌شده را با املای
+     درستش عوض کرد — ولی مدل باید املای درست را دیده باشد.
+     فهرست اصطلاح است نه جملهٔ قابل ادامه دادن، پس همان قیدِ Deepgram اینجا هم
+     رعایت می‌شود: چیزی که کاربر نگفته، ساخته نمی‌شود. */
+  function systemPrompt(glossary) {
+    var terms = String(glossary || '').split(/[،,\n]+/)
+      .map(function (t) { return t.trim(); })
+      .filter(function (t) { return t.length > 1 && t.length < 60; })
+      .slice(0, 60);
+    if (!terms.length) return cfg.POLISH_PROMPT;
+    return cfg.POLISH_PROMPT +
+      '\n\nاملای درست این نام‌ها و اصطلاحات را رعایت کن و هر شکلِ بدشنیده‌شدهٔ ' +
+      'آن‌ها را در متن به همین املا برگردان. اصطلاحی که در متن نیست را اضافه نکن: ' +
+      terms.join('، ');
+  }
+
   App.or = {
     // ویرایش متن خام: نقطه‌گذاری و اصلاح واژه‌های بدشنیده‌شده
     polish: function (text, opts) {
@@ -36,7 +53,7 @@
         body: JSON.stringify({
           model: opts.model || cfg.TEXT_MODEL,
           messages: [
-            { role: 'system', content: cfg.POLISH_PROMPT },
+            { role: 'system', content: systemPrompt(opts.glossary) },
             { role: 'user', content: text }
           ],
           temperature: 0.2

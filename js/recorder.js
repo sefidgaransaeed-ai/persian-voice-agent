@@ -8,6 +8,10 @@
 
   var cfg = App.config;
 
+  // طول بلوک ScriptProcessor. شمار بلوک‌های «آرام» از روی همین حساب می‌شود،
+  // پس این دو باید یک‌جا بمانند.
+  var BLOCK = 4096;
+
   function Recorder() {
     this.ctx = null;
     this.stream = null;
@@ -16,6 +20,7 @@
     this.running = false;
     this.buffer = [];      // تکهٔ در حال جمع شدن
     this.bufferLen = 0;
+    this.quietRun = 0;     // بلوک‌های آرامِ پشت‌سرهم — برای یافتن مکث
     this.all = [];         // کل ضبط، برای ذخیره و پاک‌نویس نهایی
     this.allLen = 0;
     this.rate = 0;
@@ -70,10 +75,15 @@
 
       var chunkLen = Math.floor(chunkSec * self.rate);
       var lapLen = Math.floor(lapSec * self.rate);
+      // سقف انتظار برای مکث؛ از اینجا به بعد چه ساکت چه نه، بریده می‌شود
+      var maxLen = Math.floor((chunkSec + cfg.CUT_GRACE_SECONDS) * self.rate);
+      // شمار بلوک‌های آرام از روی نرخ واقعیِ میکروفون، تا «ربع ثانیه» روی
+      // ۱۶ و ۴۴٫۱ و ۴۸ کیلوهرتز یک معنا بدهد
+      var quietBlocks = Math.max(1, Math.round(cfg.QUIET_SECONDS * self.rate / BLOCK));
 
       // ScriptProcessor منسوخ است ولی AudioWorklet به فایل ماژول جدا و addModule
       // نیاز دارد که با اسکریپت کلاسیک جور درنمی‌آید. اینجا همه‌جا کار می‌کند.
-      self.node = self.ctx.createScriptProcessor(4096, 1, 1);
+      self.node = self.ctx.createScriptProcessor(BLOCK, 1, 1);
       self.node.onaudioprocess = function (ev) {
         if (!self.running) return;
         var input = ev.inputBuffer.getChannelData(0);
@@ -91,7 +101,12 @@
         }
         self.emit('level', peak);
 
-        if (self.bufferLen >= chunkLen) self.cut(lapLen);
+        // پس از پر شدن تکه، دنبال یک مکث می‌گردیم تا کلمه نصف نشود
+        self.quietRun = (peak < cfg.QUIET_PEAK) ? self.quietRun + 1 : 0;
+        if (self.bufferLen >= chunkLen &&
+            (self.quietRun >= quietBlocks || self.bufferLen >= maxLen)) {
+          self.cut(lapLen);
+        }
       };
 
       self.source.connect(self.node);
@@ -128,6 +143,7 @@
 
     this.buffer = keep.length ? [keep] : [];
     this.bufferLen = keep.length;
+    this.quietRun = 0;
 
     if (rms(merged) < cfg.SILENCE_RMS) {
       this.emit('silent');
