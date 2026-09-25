@@ -17,6 +17,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# همان مسیری که voicetype.ps1 می‌خواند — باید یکی بماند
+$dataDir = Join-Path $env:LOCALAPPDATA 'ایجنت-ویس-فارسی'
+$keyFile = Join-Path $dataDir 'deepgram.key'
+
 $mime = @{
   '.html' = 'text/html; charset=utf-8'
   '.css'  = 'text/css; charset=utf-8'
@@ -49,7 +53,27 @@ foreach ($ip in @([System.Net.IPAddress]::Loopback, [System.Net.IPAddress]::IPv6
   }
 }
 if ($listeners.Count -eq 0) {
-  Write-Host "درگاه $Port آزاد نیست. با -Port یک عدد دیگر بدهید." -ForegroundColor Red
+  # درگاه گرفته است — ولی شاید خودِ همین اپ از اجرای قبلی هنوز بالاست.
+  # آن وقت مردن با پیام خطا فقط گیج می‌کند: دابل‌کلیک دوم باید مرورگر را باز
+  # کند، چون از دید کاربر اپ دارد کار می‌کند.
+  $alive = $false
+  try {
+    $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 5
+    $alive = ($probe.StatusCode -eq 200 -and $probe.Content -match 'ایجنت ویس فارسی')
+  } catch { }
+
+  if ($alive) {
+    Write-Host ""
+    Write-Host "  اپ از قبل روی درگاه $Port در حال اجراست." -ForegroundColor Cyan
+    Write-Host "  نشانی: http://localhost:$Port/" -ForegroundColor Green
+    Write-Host "  (پنجرهٔ سرورِ قبلی را نبندید.)" -ForegroundColor DarkGray
+    Write-Host ""
+    if (-not $NoBrowser) { Start-Process "http://localhost:$Port/" }
+    exit 0
+  }
+
+  Write-Host "درگاه $Port آزاد نیست و چیز دیگری آن را گرفته است." -ForegroundColor Red
+  Write-Host "با -Port یک عدد دیگر بدهید. مثال: serve.ps1 -Port 9000" -ForegroundColor Yellow
   exit 1
 }
 
@@ -137,6 +161,96 @@ try {
       if ($parts.Count -lt 2) { continue }
       $method = $parts[0]
       $path = $parts[1]
+
+      # ——— POST /api/key ———
+      # چرا سرور اجازهٔ نوشتن گرفت: کلید Deepgram فقط در localStorage مرورگر است
+      # و ابزار ویندوزی از بیرون نمی‌تواند بخواندش. این تنها پلِ ممکن است.
+      # سه قید: فقط همین مسیر، فقط از origin خودِ همین صفحه (صفحهٔ دیگری در
+      # مرورگر نباید بتواند کلید بنویسد)، و سقف حجم بدنه.
+      if ($method -eq 'POST' -and $path -eq '/api/key') {
+        $len = 0; $origin = ''
+        while ($true) {
+          $h = $reader.ReadLine()
+          if ($null -eq $h -or $h -eq '') { break }
+          if ($h -match '^(?i)content-length:\s*(\d+)') { $len = [int]$Matches[1] }
+          if ($h -match '^(?i)origin:\s*(.+)$')         { $origin = $Matches[1].Trim() }
+        }
+
+        $allowed = @("http://localhost:$Port", "http://127.0.0.1:$Port", "http://[::1]:$Port")
+        if ($allowed -notcontains $origin) {
+          Send-Response $stream 403 'Forbidden' 'application/json; charset=utf-8' `
+            ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"origin مجاز نیست"}'))
+          Write-Host "  403  /api/key  (origin: $origin)" -ForegroundColor Red
+          continue
+        }
+        if ($len -le 0 -or $len -gt 4096) {
+          Send-Response $stream 400 'Bad Request' 'application/json; charset=utf-8' `
+            ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"بدنه نامعتبر"}'))
+          continue
+        }
+
+        $buf = New-Object char[] $len
+        $got = $reader.Read($buf, 0, $len)
+        $plain = (-join $buf[0..($got - 1)]).Trim().Trim('"').Trim()
+
+        if ($plain.Length -lt 20 -or $plain -match '\s') {
+          Send-Response $stream 400 'Bad Request' 'application/json; charset=utf-8' `
+            ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"شکل کلید درست نیست"}'))
+          Write-Host "  400  /api/key  شکل کلید" -ForegroundColor Yellow
+          continue
+        }
+
+        # پیش از ذخیره آزموده می‌شود تا آشغال ذخیره نشود. مصرف اعتبار صوتی ندارد.
+        $okKey = $false; $note = ''
+        try {
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $pr = Invoke-RestMethod -Uri 'https://api.deepgram.com/v1/projects' `
+                  -Headers @{ Authorization = "Token $plain" } -TimeoutSec 30
+          $okKey = $true
+          $note = "$(@($pr.projects).Count) پروژه"
+        } catch {
+          $st = 0
+          if ($_.Exception.Response) { $st = [int]$_.Exception.Response.StatusCode }
+          $note = switch ($st) {
+            401 { 'کلید را Deepgram نپذیرفت' }
+            402 { 'اعتبار حساب تمام شده' }
+            403 { 'کشورِ آی‌پی پشتیبانی نمی‌شود — VPN آلمان' }
+            0   { 'اتصال به Deepgram برقرار نشد' }
+            default { "خطای Deepgram ($st)" }
+          }
+        }
+
+        if (-not $okKey) {
+          $j = '{"ok":false,"message":"' + $note + '"}'
+          Send-Response $stream 200 'OK' 'application/json; charset=utf-8' `
+            ([System.Text.Encoding]::UTF8.GetBytes($j))
+          Write-Host "  /api/key  رد شد: $note" -ForegroundColor Yellow
+          continue
+        }
+
+        if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Force $dataDir | Out-Null }
+        $sec = ConvertTo-SecureString $plain -AsPlainText -Force
+        ConvertFrom-SecureString $sec | Set-Content -Path $keyFile -Encoding UTF8
+
+        # و همان‌جا ابزار میان‌بر را بالا می‌آوریم تا کاربر کار دیگری نداشته باشد
+        $started = $false
+        try {
+          $vt = Join-Path $root 'voicetype.ps1'
+          if (Test-Path $vt) {
+            Start-Process powershell -ArgumentList @(
+              '-ExecutionPolicy','Bypass','-NoProfile','-File',$vt
+            ) -WindowStyle Minimized | Out-Null
+            $started = $true
+          }
+        } catch { }
+
+        $msg = "کلید ذخیره شد ($note)." + $(if ($started) { ' تایپ صوتی سراسری راه افتاد.' } else { ' ولی ابزار بالا نیامد.' })
+        $j = '{"ok":true,"started":' + $started.ToString().ToLower() + ',"message":"' + $msg + '"}'
+        Send-Response $stream 200 'OK' 'application/json; charset=utf-8' `
+          ([System.Text.Encoding]::UTF8.GetBytes($j))
+        Write-Host "  200  /api/key  ذخیره شد، راه‌اندازی=$started" -ForegroundColor Green
+        continue
+      }
 
       if ($method -ne 'GET' -and $method -ne 'HEAD') {
         Send-Response $stream 405 'Method Not Allowed' 'text/plain; charset=utf-8' `

@@ -309,7 +309,8 @@
     button.disabled = true;
     label.textContent = 'در حال ویرایش…';
 
-    App.or.polish(text, { key: key, model: App.store.settings().textModel })
+    var s = App.store.settings();
+    App.or.polish(text, { key: key, model: s.textModel, glossary: s.glossary })
       .then(function (clean) {
         if (!clean) throw new Error('مدل پاسخ خالی داد.');
         target.textContent = clean;
@@ -415,7 +416,9 @@
         });
         if (s.autoPolish && res.text && App.store.apiKey()) {
           stage.textContent = 'در حال ویرایش و نقطه‌گذاری…';
-          return App.or.polish(res.text, { key: App.store.apiKey(), model: s.textModel })
+          return App.or.polish(res.text, {
+            key: App.store.apiKey(), model: s.textModel, glossary: s.glossary
+          })
             .then(function (clean) {
               if (clean) { out.textContent = clean; stage.textContent = 'انجام شد و ویرایش شد.'; }
             });
@@ -547,14 +550,31 @@
             App.dg.checkKey(k).then(function (d) {
               App.dom.clear(gStatus);
               gStatus.appendChild(badge('good', 'کلید معتبر است'));
+              // checkKey شکل { ok, projects, name } برمی‌گرداند. فیلد audio
+              // از نسخهٔ Whisper مانده بود و اینجا استثنا می‌داد.
               gStatus.appendChild(el('div', {
                 style: 'margin-top:6px',
-                text: 'مدل‌های صوتی در دسترس: ' + d.audio.join('  •  ')
+                text: d.projects
+                  ? ('پروژه‌ها: ' + App.fmt.fa(d.projects) + (d.name ? ' — ' + d.name : ''))
+                  : 'حسابی بدون پروژه'
               }));
             }).catch(function (e) {
               App.dom.clear(gStatus);
               gStatus.appendChild(badge('crit', e.message));
             });
+          }
+        }),
+        /* کپی کلید — برای دادن کلید به «تایپ صوتی سراسری» که بیرون از مرورگر
+           است و به localStorage دسترسی ندارد. بدون این، تنها راه DevTools بود
+           که کروم چسباندن در آن را با هشدار self-XSS می‌بندد. */
+        btn('کپی کلید', {
+          icon: 'copy', variant: 'ghost',
+          onClick: function () {
+            var k = gInput.value.trim();
+            if (!k) { toast('کلید خالی است.', 'err'); return; }
+            navigator.clipboard.writeText(k).then(function () {
+              toast('کلید در کلیپ‌بورد است. حالا: تایپ-صوتی.cmd -SaveKey', 'ok');
+            }, function () { toast('کپی نشد. مرورگر اجازه نداد.', 'err'); });
           }
         }),
         btn('حذف', {
@@ -563,6 +583,46 @@
         })
       ]),
       gStatus
+    ]));
+
+    /* --- تایپ صوتی سراسری: یک کلیک --- */
+    /* کلید Deepgram فقط در localStorage همین مرورگر است و ابزار ویندوزی از
+       بیرون نمی‌تواند بخواندش. این دکمه کلید را به سرور محلی می‌دهد، سرور
+       می‌آزمایدش، رمزگذاری‌شده با DPAPI ذخیره می‌کند و ابزار را بالا می‌آورد. */
+    var vtStatus = el('div', { class: 'stage' });
+    root.appendChild(el('div', { class: 'card' }, [
+      el('h2', { text: 'تایپ صوتی سراسری — اختیاری' }),
+      el('p', {
+        class: 'hint',
+        text: 'میان‌بر ویندوزی که در هر برنامه‌ای تایپ می‌کند: چت‌باکس Claude، تلگرام، Word. ' +
+              'یک بار این دکمه را بزنید؛ کلید همین‌جا به ابزار داده می‌شود و ابزار راه می‌افتد. ' +
+              'بعد در هر جایی Ctrl+Shift+Space بزنید، حرف بزنید، و دوباره بزنید.'
+      }),
+      el('div', { class: 'row' }, [
+        btn('راه‌اندازی تایپ صوتی', {
+          icon: 'mic', variant: 'primary',
+          onClick: function () {
+            var k = gInput.value.trim();
+            if (!k) { toast('اول کلید Deepgram را وارد و ذخیره کنید.', 'err'); return; }
+            App.dom.clear(vtStatus);
+            vtStatus.textContent = 'در حال آزمودن کلید و راه‌اندازی…';
+            fetch('/api/key', {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain' },  // ساده، تا preflight نخورد
+              body: k
+            }).then(function (r) { return r.json(); }).then(function (d) {
+              App.dom.clear(vtStatus);
+              vtStatus.appendChild(badge(d.ok ? 'good' : 'crit', d.message));
+              toast(d.message, d.ok ? 'ok' : 'err');
+            }).catch(function () {
+              App.dom.clear(vtStatus);
+              vtStatus.appendChild(badge('crit',
+                'سرور محلی پاسخ نداد. صفحه را با «شروع.cmd» باز کنید، نه از نشانی آنلاین.'));
+            });
+          }
+        })
+      ]),
+      vtStatus
     ]));
 
     /* --- مدل و زبان --- */
