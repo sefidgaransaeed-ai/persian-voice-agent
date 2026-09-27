@@ -589,6 +589,14 @@
     /* کلید Deepgram فقط در localStorage همین مرورگر است و ابزار ویندوزی از
        بیرون نمی‌تواند بخواندش. این دکمه کلید را به سرور محلی می‌دهد، سرور
        می‌آزمایدش، رمزگذاری‌شده با DPAPI ذخیره می‌کند و ابزار را بالا می‌آورد. */
+    /* نشانی سرور محلی. صفحهٔ محلی نشانی نسبی می‌دهد تا با هر -Port کار کند؛
+       نسخهٔ آنلاین ناچار درگاه پیش‌فرض را صدا می‌زند، چون از آن بی‌خبر است.
+       چرا صفحهٔ https اجازهٔ تماس با http دارد: مرورگرها لوپ‌بک را «مبدأ قابل
+       اعتماد» می‌شمارند و محتوای مختلط حسابش نمی‌کنند. */
+    var isLocalPage = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(location.hostname);
+    var keyApi = isLocalPage ? '/api/key'
+                             : 'http://127.0.0.1:' + cfg.LOCAL_PORT + '/api/key';
+
     var vtStatus = el('div', { class: 'stage' });
     root.appendChild(el('div', { class: 'card' }, [
       el('h2', { text: 'تایپ صوتی سراسری — اختیاری' }),
@@ -606,7 +614,7 @@
             if (!k) { toast('اول کلید Deepgram را وارد و ذخیره کنید.', 'err'); return; }
             App.dom.clear(vtStatus);
             vtStatus.textContent = 'در حال آزمودن کلید و راه‌اندازی…';
-            fetch('/api/key', {
+            fetch(keyApi, {
               method: 'POST',
               headers: { 'Content-Type': 'text/plain' },  // ساده، تا preflight نخورد
               body: k
@@ -616,8 +624,10 @@
               toast(d.message, d.ok ? 'ok' : 'err');
             }).catch(function () {
               App.dom.clear(vtStatus);
-              vtStatus.appendChild(badge('crit',
-                'سرور محلی پاسخ نداد. صفحه را با «شروع.cmd» باز کنید، نه از نشانی آنلاین.'));
+              vtStatus.appendChild(badge('crit', isLocalPage
+                ? 'سرور محلی پاسخ نداد. صفحه را با «شروع.cmd» باز کنید.'
+                : 'به سرور روی همین رایانه نرسید. «شروع.cmd» را اجرا کنید تا درگاه ' +
+                  cfg.LOCAL_PORT + ' باز شود، بعد همین دکمه را بزنید.'));
             });
           }
         })

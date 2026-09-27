@@ -21,6 +21,14 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $dataDir = Join-Path $env:LOCALAPPDATA 'ایجنت-ویس-فارسی'
 $keyFile = Join-Path $dataDir 'deepgram.key'
 
+# origin هایی که اجازهٔ نوشتن کلید دارند. چرا نشانی آنلاین هم در فهرست است:
+# کاربر اپ را از GitHub Pages باز می‌کند ولی ابزار تایپ صوتی روی همین رایانه
+# است؛ بدون این، دکمهٔ «راه‌اندازی تایپ صوتی» فقط در نسخهٔ محلی کار می‌کرد.
+# این همچنان فهرستی بسته است و نه '*' — صفحهٔ دلخواهی نمی‌تواند کلید بنویسد،
+# و Origin برابر null (یعنی file://) هم بیرون فهرست می‌ماند.
+$webOrigin = 'https://sefidgaransaeed-ai.github.io'
+$allowed = @("http://localhost:$Port", "http://127.0.0.1:$Port", "http://[::1]:$Port", $webOrigin)
+
 $mime = @{
   '.html' = 'text/html; charset=utf-8'
   '.css'  = 'text/css; charset=utf-8'
@@ -92,16 +100,33 @@ if (-not $NoBrowser) {
 }
 
 function Send-Response {
-  param($stream, [int]$code, [string]$status, [string]$type, [byte[]]$body)
+  param($stream, [int]$code, [string]$status, [string]$type, [byte[]]$body, [string[]]$extra = @())
   $head = "HTTP/1.1 $code $status`r`n" +
           "Content-Type: $type`r`n" +
           "Content-Length: $($body.Length)`r`n" +
-          "Cache-Control: no-store`r`n" +
-          "Connection: close`r`n`r`n"
+          "Cache-Control: no-store`r`n"
+  foreach ($e in $extra) { if ($e) { $head += "$e`r`n" } }
+  $head += "Connection: close`r`n`r`n"
   $hb = [System.Text.Encoding]::ASCII.GetBytes($head)
   $stream.Write($hb, 0, $hb.Length)
   if ($body.Length -gt 0) { $stream.Write($body, 0, $body.Length) }
   $stream.Flush()
+}
+
+# سرآیندهای CORS برای /api/key. تنها origin هایی که در $allowed هستند به اینجا
+# می‌رسند، پس بازتابِ کور نیست. Allow-Private-Network برای کروم است: درخواست از
+# یک صفحهٔ عمومی به نشانی لوپ‌بک «دسترسی به شبکهٔ خصوصی» شمرده می‌شود و کروم
+# پیش‌پرواز می‌فرستد؛ بی این سرآیند، درخواست پیش از رسیدن به کد رد می‌شود.
+function Get-CorsHeaders {
+  param([string]$origin)
+  @(
+    "Access-Control-Allow-Origin: $origin",
+    'Access-Control-Allow-Methods: POST, OPTIONS',
+    'Access-Control-Allow-Headers: Content-Type',
+    'Access-Control-Allow-Private-Network: true',
+    'Access-Control-Max-Age: 600',
+    'Vary: Origin'
+  )
 }
 
 # مرورگرها اتصال‌ها را از پیش باز می‌کنند و اغلب هیچ درخواستی روی آن‌ها نمی‌فرستند.
@@ -162,6 +187,24 @@ try {
       $method = $parts[0]
       $path = $parts[1]
 
+      # ——— OPTIONS /api/key ——— پیش‌پروازِ CORS
+      # باید مثل POST پیش از رد کردن غیر-GET بیاید وگرنه ۴۰۵ می‌خورد.
+      if ($method -eq 'OPTIONS' -and $path -eq '/api/key') {
+        $origin = ''
+        while ($true) {
+          $h = $reader.ReadLine()
+          if ($null -eq $h -or $h -eq '') { break }
+          if ($h -match '^(?i)origin:\s*(.+)$') { $origin = $Matches[1].Trim() }
+        }
+        if ($allowed -contains $origin) {
+          Send-Response $stream 200 'OK' 'text/plain; charset=utf-8' (New-Object byte[] 0) (Get-CorsHeaders $origin)
+        } else {
+          Send-Response $stream 403 'Forbidden' 'text/plain; charset=utf-8' (New-Object byte[] 0)
+          Write-Host "  403  OPTIONS /api/key  (origin: $origin)" -ForegroundColor Red
+        }
+        continue
+      }
+
       # ——— POST /api/key ———
       # چرا سرور اجازهٔ نوشتن گرفت: کلید Deepgram فقط در localStorage مرورگر است
       # و ابزار ویندوزی از بیرون نمی‌تواند بخواندش. این تنها پلِ ممکن است.
@@ -176,16 +219,19 @@ try {
           if ($h -match '^(?i)origin:\s*(.+)$')         { $origin = $Matches[1].Trim() }
         }
 
-        $allowed = @("http://localhost:$Port", "http://127.0.0.1:$Port", "http://[::1]:$Port")
         if ($allowed -notcontains $origin) {
           Send-Response $stream 403 'Forbidden' 'application/json; charset=utf-8' `
             ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"origin مجاز نیست"}'))
           Write-Host "  403  /api/key  (origin: $origin)" -ForegroundColor Red
           continue
         }
+        # از اینجا به بعد origin مجاز است. بی این سرآیندها مرورگر پاسخ را به
+        # صفحهٔ آنلاین نمی‌دهد و کاربر فقط «نرسید» می‌دید.
+        $cors = Get-CorsHeaders $origin
+
         if ($len -le 0 -or $len -gt 4096) {
           Send-Response $stream 400 'Bad Request' 'application/json; charset=utf-8' `
-            ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"بدنه نامعتبر"}'))
+            ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"بدنه نامعتبر"}')) $cors
           continue
         }
 
@@ -195,7 +241,7 @@ try {
 
         if ($plain.Length -lt 20 -or $plain -match '\s') {
           Send-Response $stream 400 'Bad Request' 'application/json; charset=utf-8' `
-            ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"شکل کلید درست نیست"}'))
+            ([System.Text.Encoding]::UTF8.GetBytes('{"ok":false,"message":"شکل کلید درست نیست"}')) $cors
           Write-Host "  400  /api/key  شکل کلید" -ForegroundColor Yellow
           continue
         }
@@ -223,7 +269,7 @@ try {
         if (-not $okKey) {
           $j = '{"ok":false,"message":"' + $note + '"}'
           Send-Response $stream 200 'OK' 'application/json; charset=utf-8' `
-            ([System.Text.Encoding]::UTF8.GetBytes($j))
+            ([System.Text.Encoding]::UTF8.GetBytes($j)) $cors
           Write-Host "  /api/key  رد شد: $note" -ForegroundColor Yellow
           continue
         }
@@ -247,7 +293,7 @@ try {
         $msg = "کلید ذخیره شد ($note)." + $(if ($started) { ' تایپ صوتی سراسری راه افتاد.' } else { ' ولی ابزار بالا نیامد.' })
         $j = '{"ok":true,"started":' + $started.ToString().ToLower() + ',"message":"' + $msg + '"}'
         Send-Response $stream 200 'OK' 'application/json; charset=utf-8' `
-          ([System.Text.Encoding]::UTF8.GetBytes($j))
+          ([System.Text.Encoding]::UTF8.GetBytes($j)) $cors
         Write-Host "  200  /api/key  ذخیره شد، راه‌اندازی=$started" -ForegroundColor Green
         continue
       }
